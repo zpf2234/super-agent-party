@@ -224,10 +224,33 @@ class ProcessManager:
     async def _monitor_output(self, pid: str, proc, logs: deque):
         async def read_stream_to_log(stream, prefix=""):
             if not stream: return
-            async for line in stream:
-                decoded = line.decode('utf-8', errors='replace').rstrip()
-                timestamp = datetime.now().strftime("%H:%M:%S")
-                logs.append(f"[{timestamp}] {prefix}{decoded}")
+            try:
+                while True:
+                    # 改为读取分块，不再使用 readline()
+                    chunk = await stream.read(1024) 
+                    if not chunk:
+                        break
+                    
+                    decoded = ""
+                    for enc in ['utf-8', 'gbk', 'cp437']:
+                        try:
+                            decoded = chunk.decode(enc)
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                    if not decoded:
+                        decoded = chunk.decode('utf-8', errors='replace')
+
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    
+                    # 处理回车符 \r，将其替换为换行，这样 log 中能看到进度条的每一步更新
+                    # 如果不需要保留进度条每一行，可以直接 decoded.strip()
+                    lines = decoded.replace('\r', '\n').splitlines()
+                    for line in lines:
+                        if line.strip():
+                            logs.append(f"[{timestamp}] {prefix}{line}")
+            except Exception as e:
+                logs.append(f"[SYSTEM ERROR] {prefix}Monitoring failed: {str(e)}")
 
         try:
             await asyncio.gather(
@@ -236,12 +259,10 @@ class ProcessManager:
             )
             await proc.wait()
             if pid in self._processes:
-                # 只有当状态不是被手动 terminated 时才更新为 exited
                 if "terminated" not in self._processes[pid]["status"]:
                     self._processes[pid]["status"] = f"exited (code {proc.returncode})"
-        except Exception as e:
-            if pid in self._processes:
-                logs.append(f"[SYSTEM ERROR] Process monitoring failed: {str(e)}")
+        except Exception:
+            pass
 
     def get_logs(self, pid: str, lines: int = 50) -> str:
         if pid not in self._processes:
@@ -534,7 +555,14 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
         yield f"Docker Sandbox Error: {str(e)}"
         return
 
-    exec_cmd = ["docker", "exec", "-i", container_name, "sh", "-c", f"cd /workspace && {command}"]
+    exec_cmd = [
+        "docker", "exec", 
+        "-i", 
+        "-e", "PYTHONUNBUFFERED=1",
+        "-e", "TERM=xterm",
+        container_name, 
+        "sh", "-c", f"cd /workspace && {command}"
+    ]
     
     try:
         process = await asyncio.create_subprocess_exec(
@@ -576,6 +604,7 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
         except asyncio.TimeoutError:
             process.kill()
             yield f"\n\n[TIMEOUT ERROR] Docker 命令执行超过 {effective_timeout} 秒已强制终止。注意！命令并未完全执行完毕。"
+            yield "\n💡 提示：对于启动应用或大文件下载，请使用 'background': true。"
     except Exception as e:
         yield f"[ERROR] Docker 进程启动失败: {str(e)}"
 
@@ -918,17 +947,21 @@ async def search_files_tool(pattern: str, path: str = ".") -> str:
 
 # ==================== [新增] 管理工具：进程与网络 ====================
 
-async def manage_processes_tool(action: str, pid: str = None) -> str:
-    """[Common] 管理后台进程"""
-    if action == "list":
-        return process_manager.list_processes()
-    if action == "logs":
-        if not pid: return "Error: 'pid' is required for logs."
-        return process_manager.get_logs(pid)
-    if action == "kill":
-        if not pid: return "Error: 'pid' is required for kill."
-        return await process_manager.kill_process(pid)
-    return "Error: Unknown action. Use list, logs, or kill."
+async def list_processes_tool() -> str:
+    """[Common] 列出所有后台进程 (Docker & 本地)"""
+    return process_manager.list_processes()
+
+async def get_process_logs_tool(pid: str) -> str:
+    """[Common] 获取指定进程的日志"""
+    if not pid:
+        return "Error: 'pid' is required to fetch logs."
+    return process_manager.get_logs(pid)
+
+async def kill_process_tool(pid: str) -> str:
+    """[Common] 终止指定的后台进程"""
+    if not pid:
+        return "Error: 'pid' is required to kill a process."
+    return await process_manager.kill_process(pid)
 
 async def docker_manage_ports_tool(action: str, container_port: int = 8000, host_port: int = None) -> str:
     """[Docker] 端口转发管理"""
@@ -1151,13 +1184,17 @@ async def shell_tool_local(command: str, background: bool = False, timeout: int 
     else:
         exe, args = os.environ.get('SHELL', '/bin/bash'), ["-c", command]
 
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["TERM"] = "xterm"
+
     try:
         process = await asyncio.create_subprocess_exec(
             exe, *args,
             stdout=asyncio.subprocess.PIPE, 
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
-            env=os.environ.copy(),
+            env=env, # 使用修改后的 env
             start_new_session=(system != "Windows")
         )
 
@@ -2091,17 +2128,49 @@ TOOLS_REGISTRY = {
             }
         }
     },
-    "manage_processes": {
-        "type": "function", "function": {
-            "name": "manage_processes_tool", 
-            "description": "Check logs or kill background processes (Docker & Local).",
+    "list_processes": {
+        "type": "function",
+        "function": {
+            "name": "list_processes_tool",
+            "description": "List all running background processes (both Docker containers and local processes).",
             "parameters": {
-                "type": "object", 
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    "get_process_logs": {
+        "type": "function",
+        "function": {
+            "name": "get_process_logs_tool",
+            "description": "Retrieve logs for a specific background process using its PID or Container ID.",
+            "parameters": {
+                "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "logs", "kill"]},
-                    "pid": {"type": "string"}
-                }, 
-                "required": ["action"]
+                    "pid": {
+                        "type": "string",
+                        "description": "The process ID or container ID to fetch logs for."
+                    }
+                },
+                "required": ["pid"]
+            }
+        }
+    },
+    "kill_process": {
+        "type": "function",
+        "function": {
+            "name": "kill_process_tool",
+            "description": "Terminate a background process or stop a Docker container using its PID or ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pid": {
+                        "type": "string",
+                        "description": "The process ID or container ID to terminate."
+                    }
+                },
+                "required": ["pid"]
             }
         }
     },
@@ -2322,17 +2391,49 @@ LOCAL_TOOLS_REGISTRY = {
             }
         }
     },
-    "manage_processes_local": {
-        "type": "function", "function": {
-            "name": "manage_processes_tool", 
-            "description": "Manage local background processes.",
+    "list_processes": {
+        "type": "function",
+        "function": {
+            "name": "list_processes_tool",
+            "description": "List all running background processes (both Docker containers and local processes).",
             "parameters": {
-                "type": "object", 
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    "get_process_logs": {
+        "type": "function",
+        "function": {
+            "name": "get_process_logs_tool",
+            "description": "Retrieve logs for a specific background process using its PID or Container ID.",
+            "parameters": {
+                "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "logs", "kill"]},
-                    "pid": {"type": "string"}
-                }, 
-                "required": ["action"]
+                    "pid": {
+                        "type": "string",
+                        "description": "The process ID or container ID to fetch logs for."
+                    }
+                },
+                "required": ["pid"]
+            }
+        }
+    },
+    "kill_process": {
+        "type": "function",
+        "function": {
+            "name": "kill_process_tool",
+            "description": "Terminate a background process or stop a Docker container using its PID or ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pid": {
+                        "type": "string",
+                        "description": "The process ID or container ID to terminate."
+                    }
+                },
+                "required": ["pid"]
             }
         }
     },
@@ -2366,10 +2467,10 @@ def get_tools_for_mode(mode: str) -> list:
     # 编辑
     edit = [TOOLS_REGISTRY["edit_file"], TOOLS_REGISTRY["edit_file_patch"], TOOLS_REGISTRY["todo_write"]]
     # 基础设施 (执行/进程/端口)
-    infra = [TOOLS_REGISTRY["bash"], TOOLS_REGISTRY["manage_processes"], TOOLS_REGISTRY["manage_ports"]]
+    infra = [TOOLS_REGISTRY["bash"], TOOLS_REGISTRY["list_processes"], TOOLS_REGISTRY["get_process_logs"], TOOLS_REGISTRY["kill_process"], TOOLS_REGISTRY["manage_ports"]]
     
     if mode == "default": return read
-    if mode == "auto-approve": return read + edit + [TOOLS_REGISTRY["manage_processes"]]
+    if mode == "auto-approve": return read + edit + [TOOLS_REGISTRY["list_processes"], TOOLS_REGISTRY["get_process_logs"], TOOLS_REGISTRY["kill_process"]]
     if mode == "yolo": return read + edit + infra
     return read
 
@@ -2387,11 +2488,11 @@ def get_local_tools_for_mode(mode: str) -> list:
     edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
     infra = [
         LOCAL_TOOLS_REGISTRY["bash_local"], 
-        LOCAL_TOOLS_REGISTRY["manage_processes_local"],
+        LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"], LOCAL_TOOLS_REGISTRY["kill_process"],
         LOCAL_TOOLS_REGISTRY["local_net_tool"]
     ]
     
     if mode == "default": return read
-    if mode == "auto-approve": return read + edit + [LOCAL_TOOLS_REGISTRY["manage_processes_local"], LOCAL_TOOLS_REGISTRY["local_net_tool"]]
+    if mode == "auto-approve": return read + edit + [LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"], LOCAL_TOOLS_REGISTRY["kill_process"], LOCAL_TOOLS_REGISTRY["local_net_tool"]]
     if mode == "yolo": return read + edit + infra
     return read
