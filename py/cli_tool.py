@@ -517,7 +517,7 @@ async def _exec_docker_cmd_simple(cwd: str, cmd_list: list) -> str:
 
 # ==================== Docker 环境工具实现 (含新功能) ====================
 
-async def docker_sandbox(command: str, background: bool = False, timeout: int = 60) -> AsyncIterator[str]:
+async def docker_sandbox(command: str, background: bool = False, timeout: int = 600) -> AsyncIterator[str]:
     """
     [Docker] 沙盒执行（打平版，直接返回异步生成器）
     """
@@ -1117,7 +1117,7 @@ async def read_stream(stream, *, is_error: bool = False):
         yield f"{prefix}{decoded}"
 
 
-async def shell_tool_local(command: str, background: bool = False, timeout: int = 60) -> AsyncIterator[str]:
+async def shell_tool_local(command: str, background: bool = False, timeout: int = 600) -> AsyncIterator[str]:
     """
     [Local] 执行本地命令（支持动态超时）
     """
@@ -1881,7 +1881,7 @@ async def read_skill_tool_local(skill_id: str) -> str:
 COMMON_BASH_DESC = (
     "Execute commands. Guidance: \n"
     "1. For long-running tasks (servers, watchers, large downloads), set 'background': true.\n"
-    "2. For medium tasks, adjust 'timeout' (1-3600s, default 60s).\n"
+    "2. For medium tasks, adjust 'timeout' (1-3600s, default 600s).\n"
     "3. If 'background' is true, wait a few seconds for initialization before checking logs/status; do not poll rapidly."
 )
 
