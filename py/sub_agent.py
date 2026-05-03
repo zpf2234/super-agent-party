@@ -166,47 +166,44 @@ class SubAgentExecutor:
 
         # B. 推送到外部平台 (Wechat, Feishu, etc.)
         for platform in target_platforms:
-            if platform == "chat": continue # 网页端已处理
-            
+            if platform == "chat": continue
+
             handler = global_behavior_engine.handlers.get(platform)
             if not handler:
                 print(f"[TaskExecutor] 平台 {platform} 尚未注册 handler，跳过推送")
                 continue
-                
+
+            # 提前定义好 trigger 和 action，供所有分支使用
+            trigger_obj = BehaviorTrigger(
+                type="time",
+                time=BehaviorTriggerTime(timeValue="00:00:00", days=[]),
+                noInput=BehaviorTriggerNoInput(latency=30),
+                cycle=BehaviorTriggerCycle(cycleValue="00:00:30", repeatNumber=1, isInfiniteLoop=False)
+            )
+            action_obj = BehaviorAction(
+                type="prompt",
+                prompt=f"【自主任务汇报】\n任务名称：{task.title}\n任务ID：{task.task_id}\n\n执行结果：\n{result}\n\n请你作为助手，对上述任务结果进行简要总结并回复给用户。",
+            )
+            fake_behavior = BehaviorItem(
+                enabled=True,
+                trigger=trigger_obj,
+                action=action_obj,
+                platform=platform,
+                platforms=[platform]
+            )
+
             targets = global_behavior_engine.platform_targets.get(platform, [])
             if not targets:
-                print(f"[TaskExecutor] 平台 {platform} 未配置目标 ChatID，无法推送结果")
+                # 没有显式配置目标 ChatID，传入空字符串交给 handler 自己去 fallback
+                print(f"[TaskExecutor] 平台 {platform} 未配置目标 ChatID，尝试使用空 ID 触发 fallback")
+                asyncio.create_task(handler("", fake_behavior))
                 continue
 
-            try:
-                # 严格构造 Pydantic 模型，防止校验失败
-                trigger_obj = BehaviorTrigger(
-                    type="time",
-                    time=BehaviorTriggerTime(timeValue="00:00:00", days=[]),
-                    noInput=BehaviorTriggerNoInput(latency=30),
-                    cycle=BehaviorTriggerCycle(cycleValue="00:00:30", repeatNumber=1, isInfiniteLoop=False)
-                )
-                
-                action_obj = BehaviorAction(
-                    type="prompt",
-                    prompt=f"【自主任务汇报】\n任务名称：{task.title}\n任务ID：{task.task_id}\n\n执行结果：\n{result}\n\n请你作为助手，对上述任务结果进行简要总结并回复给用户。",
-                )
-                
-                fake_behavior = BehaviorItem(
-                    enabled=True,
-                    trigger=trigger_obj,
-                    action=action_obj,
-                    platform=platform,
-                    platforms=[platform]
-                )
-
-                for chat_id in set(targets):
-                    if chat_id:
-                        print(f"[TaskExecutor] 正在触发平台动作 -> {platform}:{chat_id}")
-                        asyncio.create_task(handler(chat_id, fake_behavior))
-                        
-            except Exception as e:
-                print(f"[TaskExecutor] 构造推送行为失败: {e}")
+            # 有显式目标时原逻辑
+            for chat_id in set(targets):
+                if chat_id:
+                    print(f"[TaskExecutor] 正在触发平台动作 -> {platform}:{chat_id}")
+                    asyncio.create_task(handler(chat_id, fake_behavior))
 
         return {"success": True, "task_id": task_id, "result": result}
 

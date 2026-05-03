@@ -379,15 +379,13 @@ class WeChatClient:
         if self._shutdown_requested: return
         
         chat_id = getattr(msg, 'user_id', 'unknown_user')
-
         self.last_active_chat_id = chat_id 
-
         global_behavior_engine.report_activity("wechat", chat_id)
         
         user_text = getattr(msg, 'text', '')
         if not user_text: return
 
-        # 指令和记忆逻辑 (保持不变)
+        # 指令和记忆逻辑
         if "/id" in user_text.lower():
             info_msg = f"🤖 **会话信息识别成功**\n\n当前 ChatID:\n`{chat_id}`\n\n💡 说明: 请复制上方 ID 填入自主行为列表。"
             await self._send_text(msg, info_msg)
@@ -420,7 +418,7 @@ class WeChatClient:
                 if not chunk.choices: continue
                 content = chunk.choices[0].delta.content or ""
                 
-                # 处理推理内容 (如果开启)
+                # 处理推理内容
                 reasoning = ""
                 if hasattr(chunk.choices[0].delta, "reasoning_content"):
                     reasoning = chunk.choices[0].delta.reasoning_content
@@ -430,23 +428,18 @@ class WeChatClient:
                 full_response.append(content)
                 state["text_buffer"] += content
                 
-                # --- [核心修复：分段逻辑] ---
+                # 分段逻辑
                 buffer = state["text_buffer"]
                 split_pos = -1
                 
-                # 1. 检查是否强制超长分段 (防止单个气泡过长)
                 if len(buffer) > 800:
-                    # 寻找最近的一个分隔符进行切割
                     for sep in self.separators:
                         pos = buffer.find(sep)
                         if pos != -1:
                             split_pos = pos + len(sep)
                             break
-                    # 如果没找到分隔符但实在太长了，强行切割
                     if split_pos == -1 and len(buffer) > 1200:
                         split_pos = 1000
-
-                # 2. 正常搜索分隔符
                 else:
                     for sep in self.separators:
                         pos = buffer.find(sep)
@@ -454,18 +447,16 @@ class WeChatClient:
                             split_pos = pos + len(sep)
                             break
                 
-                # 3. 如果找到了切割点，发送这一段
                 if split_pos != -1:
                     current_chunk = buffer[:split_pos]
-                    state["text_buffer"] = buffer[split_pos:] # 留下剩下的内容
+                    state["text_buffer"] = buffer[split_pos:]
                     
                     clean_text = self._clean_text(current_chunk)
                     if clean_text:
                         await self._send_text(msg, clean_text)
-                        # 给微信接口一点点喘息时间，防止乱序或合并（可选）
                         await asyncio.sleep(0.1)
 
-            # --- [处理流结束后的残留内容] ---
+            # 处理流结束后的残留内容
             if state["text_buffer"]:
                 clean_text = self._clean_text(state["text_buffer"])
                 if clean_text:
@@ -491,8 +482,8 @@ class WeChatClient:
 
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
         """
-        [完整版] 响应行为引擎的主动推送指令
-        特性：自动回退活跃ID、流式分段发送、TTS同步
+        [优化版] 响应行为引擎的主动推送指令
+        改为非流式合并发送，避免频率限制
         """
         # 1. 目标 ID 决策逻辑
         target_id = chat_id
@@ -505,7 +496,7 @@ class WeChatClient:
             logging.info("ℹ️ [微信行为引擎] 行为触发，但既无配置 ID 也无活跃记录，跳过执行。")
             return
             
-        # 2. 微信 Context Token 检查 (核心限制)
+        # 2. 微信 Context Token 检查
         ct = self.bot._context_tokens.get(target_id)
         if not ct:
             logging.warning(f"⚠️ [微信行为引擎] 无法向 {target_id} 推送消息：缺少 Context Token。")
@@ -519,11 +510,10 @@ class WeChatClient:
         if not prompt_content: 
             return
 
-        # 4. 准备 AI 请求
+        # 4. 准备 AI 请求（使用非流式）
         if target_id not in self.memoryList: 
             self.memoryList[target_id] = []
         
-        # 拷贝记忆，防止干扰主循环
         messages = self.memoryList[target_id].copy()
         messages.append({"role": "user", "content": f"[system]: {prompt_content}"})
 
@@ -532,16 +522,13 @@ class WeChatClient:
             base_url=f"http://127.0.0.1:{self.port}/v1"
         )
         
-        state = {"text_buffer": ""}
-        full_response_list = []
-        
         try:
-            # 使用流式请求实现“一句一句出”的效果
-            stream = await asyncio.wait_for(
+            # 【核心优化】使用非流式请求，一次性获取完整回复
+            response = await asyncio.wait_for(
                 client.chat.completions.create(
                     model=self.WeChatAgent,
                     messages=messages,
-                    stream=True, 
+                    stream=False,  # 改为非流式
                     extra_body={
                         "is_app_bot": True,
                         "platform": "wechat",
@@ -551,62 +538,23 @@ class WeChatClient:
                 timeout=60.0
             )
             
-            async for chunk in stream:
-                if not chunk.choices: continue
-                delta = chunk.choices[0].delta
+            # 获取完整回复内容
+            full_content = response.choices[0].message.content
+            
+            # 清理文本
+            clean_content = self._clean_text(full_content)
+            
+            if clean_content:
+                # 【核心优化】合并成一条消息发送，避免频率限制
+                await self.bot.send(target_id, clean_content)
                 
-                # 处理内容和推理内容
-                content = delta.content or ""
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    if self.reasoningVisible:
-                        content = delta.reasoning_content
-                
-                if not content: continue
-                
-                full_response_list.append(content)
-                state["text_buffer"] += content
-                
-                # --- 分段切割逻辑 ---
-                buffer = state["text_buffer"]
-                split_pos = -1
-                
-                # 在缓冲区中寻找分隔符（。 \n ？ ！）
-                for sep in self.separators:
-                    pos = buffer.find(sep)
-                    if pos != -1:
-                        split_pos = pos + len(sep)
-                        break
-                
-                # 如果单句实在太长了（超过800字），强行切割
-                if split_pos == -1 and len(buffer) > 800:
-                    split_pos = 800
-
-                # 命中切割点，发送气泡
-                if split_pos != -1:
-                    current_chunk = buffer[:split_pos]
-                    state["text_buffer"] = buffer[split_pos:]
-                    
-                    clean_text = self._clean_text(current_chunk)
-                    if clean_text:
-                        await self.bot.send(target_id, clean_text)
-                        # 给微信接口留 0.5 秒间隔，防止手机端乱序或合并气泡
-                        await asyncio.sleep(0.5)
-
-            # 5. 处理流结束后的残留文本
-            if state["text_buffer"]:
-                clean_text = self._clean_text(state["text_buffer"])
-                if clean_text:
-                    await self.bot.send(target_id, clean_text)
-
-            # 6. 更新长期记忆
-            full_content = "".join(full_response_list)
-            if full_content:
-                # 记录 [system] 指令及 AI 的完整回答
+                # 更新长期记忆
                 self.memoryList[target_id].append({"role": "user", "content": f"[system]: {prompt_content}"})
                 self.memoryList[target_id].append({"role": "assistant", "content": full_content})
+                
                 logging.info(f"✅ [微信行为引擎] 主动消息已成功推送到 {target_id}")
                 
-                # 7. 同步下发 TTS 语音文件
+                # 同步下发 TTS 语音文件
                 if self.enableTTS:
                     await self._send_voice(target_id, full_content)
                     
@@ -633,7 +581,7 @@ class WeChatClient:
             settings = await load_settings()
             tts_settings = settings.get("ttsSettings", {})
             
-            # 清理 Markdown 字符，避免语音引擎念出星号或井号
+            # 清理 Markdown 字符
             clean_tts_text = self._clean_text(text)
             if not clean_tts_text: return
             
@@ -642,7 +590,7 @@ class WeChatClient:
                 "voice": "default",
                 "ttsSettings": tts_settings,
                 "index": 0,
-                "format": "mp3" # 微信推荐发送常规音频格式
+                "format": "mp3"
             }
             
             logging.info("正在请求 TTS 生成微信语音回复...")
@@ -653,15 +601,12 @@ class WeChatClient:
                         logging.error(f"TTS 请求失败: {resp.status}")
                         return
                     
-                    # 直接获取音频的二进制流 bytes
                     audio_bytes = await resp.read()
                     
-                    # 提取正确的 ID (兼容传 msg 对象 或 纯 chat_id 的情况)
                     chat_id = getattr(target, 'user_id', target)
                     
                     try:
                         logging.info("正在向微信发送 TTS 语音文件...")
-                        # 严格调用 SDK 的 send_media / reply_media 字典传参格式
                         content_dict = {
                             "file": audio_bytes, 
                             "file_name": "voice_reply.mp3"
