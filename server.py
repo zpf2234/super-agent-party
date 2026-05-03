@@ -1080,7 +1080,9 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         edit_file_patch_tool, 
         glob_files_tool,       
         todo_write_tool, 
-        manage_processes_tool,
+        list_processes_tool,
+        get_process_logs_tool,
+        kill_process_tool,
         docker_manage_ports_tool,
         read_skill_tool,
     )
@@ -1213,7 +1215,9 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         "edit_file_patch_tool": edit_file_patch_tool,
         "glob_files_tool": glob_files_tool,
         "todo_write_tool": todo_write_tool,
-        "manage_processes_tool": manage_processes_tool,
+        "list_processes_tool": list_processes_tool,
+        "get_process_logs_tool": get_process_logs_tool,
+        "kill_process_tool": kill_process_tool,
         "docker_manage_ports_tool": docker_manage_ports_tool,
         "read_skill_tool": read_skill_tool,
         
@@ -1266,7 +1270,9 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         "shell_tool_local",
         "edit_file_tool_local",
         "edit_file_patch_tool_local",
-        "manage_processes_tool",
+        "list_processes_tool",
+        "get_process_logs_tool",
+        "kill_process_tool",
         "docker_manage_ports_tool",
         "local_net_tool",
     ]
@@ -3957,7 +3963,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         SUBAGENT_BLOCKED_TOOLS = [
                             
                             # 阻止子智能体管理进程/端口
-                            "manage_processes_tool",
+                            "list_processes_tool",
+                            "get_process_logs_tool",
+                            "kill_process_tool",
                             "docker_manage_ports_tool",
                             "local_net_tool",
                             
@@ -6457,7 +6465,9 @@ async def execute_tool_manually(request: Request):
         edit_file_patch_tool, 
         glob_files_tool,       
         todo_write_tool, 
-        manage_processes_tool,
+        list_processes_tool,
+        get_process_logs_tool,
+        kill_process_tool,
         docker_manage_ports_tool,
         read_skill_tool,
     )
@@ -6590,7 +6600,9 @@ async def execute_tool_manually(request: Request):
         "edit_file_patch_tool": edit_file_patch_tool,
         "glob_files_tool": glob_files_tool,
         "todo_write_tool": todo_write_tool,
-        "manage_processes_tool": manage_processes_tool,
+        "list_processes_tool": list_processes_tool,
+        "get_process_logs_tool": get_process_logs_tool,
+        "kill_process_tool": kill_process_tool,
         "docker_manage_ports_tool": docker_manage_ports_tool,
         "read_skill_tool": read_skill_tool,
         
