@@ -2972,32 +2972,6 @@ let vue_methods = {
                                 // 1. 获取当前块并使用 smartMergeTerminal 更新（解决进度条刷屏）
                                 const targetBlock = getBlock('tool_result', toolCallId, toolName);
                                 targetBlock.content = this.smartMergeTerminal(targetBlock.content, tool.content);
-
-                                const preIdMatch = `id="pre-result-${toolCallId}"`;
-                                let preStartIndex = currentMsg.content.lastIndexOf(preIdMatch);
-                                
-                                if (preStartIndex > -1) {
-                                    let nextPreEndIndex = currentMsg.content.indexOf('</pre>', preStartIndex);
-                                    if (nextPreEndIndex > -1) {
-                                        let readableStreamChunk = tool.content;
-                                        // 如果是进度条更新（包含 \r），我们需要重新计算这一块的 HTML
-                                        if (readableStreamChunk.includes('\r')) {
-                                            const displayContent = this.smartMergeTerminal('', targetBlock.content); // 重新拿到合并后的纯文本
-                                            // 替换掉旧的 <pre> 里的内容
-                                            const preContentStart = currentMsg.content.indexOf('>', preStartIndex) + 1;
-                                            currentMsg.content = currentMsg.content.substring(0, preContentStart) + 
-                                                                escapeHtml(displayContent) + 
-                                                                currentMsg.content.substring(nextPreEndIndex);
-                                        } else {
-                                            // 原有的逻辑：普通追加
-                                            if (typeof readableStreamChunk === 'string') {
-                                                readableStreamChunk = readableStreamChunk.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-                                            }
-                                            const contentToAppend = escapeHtml(readableStreamChunk);
-                                            currentMsg.content = currentMsg.content.substring(0, nextPreEndIndex) + contentToAppend + currentMsg.content.substring(nextPreEndIndex);
-                                        }
-                                    }
-                                }
                                 
                                 const lastToolIndex = currentMsg.backend_content.length - 1;
                                 for (let i = lastToolIndex; i >= 0; i--) {
