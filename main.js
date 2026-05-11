@@ -636,25 +636,6 @@ function handleDownloadItem(event, item, webContents) {
   });
 }
 
-// 2. 修改监听函数，同时监听两个会话
-function setupDownloadListener(win) {
-    
-    // A. 监听主窗口默认会话 (用于应用自身的下载)
-    win.webContents.session.on('will-download', (event, item, webContents) => {
-        handleDownloadItem(win, event, item, webContents);
-    });
-
-    // B. ★★★ 关键修复：监听 Webview 的隔离会话 ★★★
-    // 这里的字符串必须和你 HTML 里 <webview partition="..."> 的值一模一样！
-    // 你之前的代码里写的是 'persist:party-browser-session'
-    const webviewSession = session.fromPartition('persist:party-browser-session');
-    
-    webviewSession.on('will-download', (event, item, webContents) => {
-        // 让主窗口 (win) 去通知渲染进程
-        handleDownloadItem(win, event, item, webContents);
-    });
-}
-
 
 // 处理前端发来的控制指令 (暂停/继续/取消)
 ipcMain.handle('download-control', (event, { id, action }) => {
@@ -776,6 +757,11 @@ app.whenReady().then(async () => {
 
 
     const partySession = session.fromPartition('persist:party-browser-session');
+
+    partySession.on('will-download', (event, item, webContents) => {
+        console.log('捕获到下载请求 (来自 Webview 分区):', item.getFilename());
+        handleDownloadItem(event, item, webContents);
+    });
 
     // 拦截请求头，进行深度伪装
     partySession.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
@@ -904,7 +890,7 @@ app.whenReady().then(async () => {
     //重启应用
     ipcMain.handle('restart-app', () => {
       app.relaunch();
-      app.exit();
+      app.quit();
     })
 
     ipcMain.handle('save-screenshot-direct', async (event, { buffer }) => {
