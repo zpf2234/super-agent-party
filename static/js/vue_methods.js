@@ -2741,8 +2741,11 @@ let vue_methods = {
                         if (delta.reasoning_content) {
                             const block = getBlock('reasoning');
                             block.content += delta.reasoning_content;
-                            // 不再操作 currentMsg.content
-                            this.requestScrollToBottom();
+                            // 防抖合并到 displayBlocks
+                            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                            this._streamUpdateTimer = setTimeout(() => {
+                                this.flushStreamTextBuffer();
+                            }, 80);
                         }
 
                         // B. 处理文本 (Content) —— 流式防抖更新
@@ -2816,8 +2819,11 @@ let vue_methods = {
 
                             const b = getBlock('tool_call', toolCallId, progress.name);
                             b.args = accArgs;
-                            // 不再生成 HTML 字符串
-                            this.requestScrollToBottom();
+                            // 防抖合并到 displayBlocks
+                            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                            this._streamUpdateTimer = setTimeout(() => {
+                                this.flushStreamTextBuffer();
+                            }, 80);
                             continue;
                         }
 
@@ -2874,7 +2880,11 @@ let vue_methods = {
                                 // 不再生成 HTML，直接更新 backend_content
                                 currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: "{}" });
                                 currentMsg.backend_content.push({ role: 'assistant', content: '' });
-                                this.requestScrollToBottom();
+                                // 防抖合并到 displayBlocks
+                                if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                                this._streamUpdateTimer = setTimeout(() => {
+                                    this.flushStreamTextBuffer();
+                                }, 80);
                             }
                             else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
                                 const targetBlock = getBlock('tool_result', toolCallId, toolName);
@@ -2937,7 +2947,11 @@ let vue_methods = {
                                     }
                                 }
                             }
-                            this.requestScrollToBottom();
+                            // 防抖合并到 displayBlocks
+                            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                            this._streamUpdateTimer = setTimeout(() => {
+                                this.flushStreamTextBuffer();
+                            }, 80);
                         }
 
                         if (delta.audio?.data) {
