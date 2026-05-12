@@ -2627,7 +2627,11 @@ let vue_methods = {
         const getBlock = (type, id = null, name = null) => {
             if (!currentMsg.displayBlocks) currentMsg.displayBlocks = [];
             const blocks = currentMsg.displayBlocks;
-            
+           
+            while (blocks.length > 0 && Object.isFrozen(blocks[0]) && blocks.length >= MAX_RENDERED_BLOCKS) {
+                blocks.shift();
+            }
+
             // 如果有 id，先查找已存在的块（如 tool_call / tool_result 复用）
             if (id) {
                 const existing = blocks.find(b => b.type === type && b.id === id);
