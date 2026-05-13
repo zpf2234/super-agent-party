@@ -184,6 +184,97 @@ def get_detailed_exit_info(code: int, command: str) -> str:
     return info
 
 
+def _apply_patch(content: str, old_string: str, new_string: str) -> tuple[bool, str, str]:
+    """
+    高度鲁棒的补丁应用算法，完美解决 AI 换行符幻觉和“空行不断膨胀”的问题。
+    """
+    # 统一换行符为 \n
+    content_lf = content.replace('\r\n', '\n')
+    old_lf = old_string.replace('\r\n', '\n')
+    new_lf = new_string.replace('\r\n', '\n')
+
+    # 1. 绝对精确匹配 (速度最快，且绝不产生多余空行)
+    if old_lf in content_lf:
+        return True, content_lf.replace(old_lf, new_lf, 1), "Exact match successful."
+
+    # 2. 智能模糊匹配阶段
+    content_lines = content_lf.split('\n')
+    old_lines = old_lf.split('\n')
+    new_lines = new_lf.split('\n')
+
+    # 辅助函数：统计首尾的空行数量
+    def count_empty_padding(lines):
+        start = 0
+        while start < len(lines) and not lines[start].strip():
+            start += 1
+        end = 0
+        while end < len(lines) and not lines[len(lines)-1-end].strip():
+            end += 1
+        return start, end
+
+    # 统计并剥离 old_lines 首尾用来凑格式的空行
+    old_pad_start, old_pad_end = count_empty_padding(old_lines)
+    old_actual_end = len(old_lines) - old_pad_end
+    old_stripped = old_lines[old_pad_start : old_actual_end]
+    
+    if not old_stripped:
+        return False, content, "old_string is empty or only contains whitespaces."
+
+    # 滑动窗口匹配
+    def find_match(ignore_leading=False):
+        for i in range(len(content_lines) - len(old_stripped) + 1):
+            match = True
+            for j in range(len(old_stripped)):
+                c_line = content_lines[i+j].rstrip()
+                o_line = old_stripped[j].rstrip()
+                if ignore_leading:
+                    c_line = c_line.lstrip()
+                    o_line = o_line.lstrip()
+                if c_line != o_line:
+                    match = False
+                    break
+            if match:
+                return i
+        return -1
+
+    match_idx = find_match(ignore_leading=False)
+    msg = "Fuzzy match successful (ignored trailing whitespaces)."
+    if match_idx == -1:
+        match_idx = find_match(ignore_leading=True)
+        msg = "Fuzzy match successful (ignored leading/trailing whitespaces)."
+
+    if match_idx != -1:
+        # 切片截取被保留的原文
+        pre = content_lines[:match_idx]
+        post = content_lines[match_idx + len(old_stripped):]
+        
+        # --- 杜绝空行膨胀的核心逻辑 ---
+        new_pad_start, new_pad_end = count_empty_padding(new_lines)
+        
+        # 抵消 AI 在 old 和 new 中同时附带的无用上下文空行
+        # 只有当 AI 故意在 new_string 中多加了空行时（即差值），才将其写入文件
+        strip_front = min(old_pad_start, new_pad_start)
+        strip_back = min(old_pad_end, new_pad_end)
+        
+        new_actual_end = len(new_lines) - strip_back
+        new_final = new_lines[strip_front : new_actual_end]
+        
+        # 核心修复：使用纯 List 合并，绝对不硬编码拼接额外的 "\n"
+        new_content = '\n'.join(pre + new_final + post)
+        return True, new_content, msg
+
+    # 匹配失败，生成带行号的纠错建议给 AI
+    first_line_clean = old_stripped[0].strip()
+    candidates =[]
+    for i, line in enumerate(content_lines):
+        if first_line_clean and first_line_clean in line:
+            candidates.append(f"Line {i+1}: {line.strip()[:80]}")
+            
+    err_msg = "[Error] old_string not found in file. Check line endings or indentation.\n"
+    if candidates:
+        err_msg += "Did you mean one of these locations?\n" + "\n".join(candidates[:5])
+    return False, content, err_msg
+
 # ==================== [新增] 核心基础设施：进程管理 ====================
 
 class ProcessManager:
@@ -671,26 +762,17 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
         yield f"[ERROR] Docker 进程启动失败: {str(e)}"
 
 async def edit_file_patch_tool(path: str, old_string: str, new_string: str) -> str:
-    """[Docker] 精确字符串替换"""
+    """[Docker] 精确字符串替换（防膨胀版）"""
     try:
         real_cwd = await _get_current_cwd()
         container_name = await get_or_create_docker_sandbox(real_cwd)
         
         content = await _exec_docker_cmd_simple(real_cwd, ["cat", path])
         
-        normalized_content = "\n".join(line.rstrip() for line in content.split("\n"))
-        normalized_old = "\n".join(line.rstrip() for line in old_string.split("\n"))
-        
-        if normalized_old not in normalized_content:
-            lines = content.split("\n")
-            first_line = old_string.split("\n")[0] if "\n" in old_string else old_string
-            similar_lines = [f"Line {i+1}: {line[:80]}" for i, line in enumerate(lines) if first_line.strip() in line]
-            error_msg = f"[Error] Old string not found in file '{path}'.\n"
-            if similar_lines:
-                error_msg += f"\nFound similar lines:\n" + "\n".join(similar_lines[:5])
-            return error_msg
-        
-        new_content = content.replace(old_string, new_string, 1)
+        # 调用引擎处理
+        success, new_content, msg = _apply_patch(content, old_string, new_string)
+        if not success:
+            return msg
         
         with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
             tmp.write(new_content)
@@ -702,10 +784,10 @@ async def edit_file_patch_tool(path: str, old_string: str, new_string: str) -> s
         os.unlink(tmp_path)
         
         if cp_proc.returncode != 0: return "[Error] Patch copy failed."
-        return f"[Success] Patched '{path}'."
-        
+        return f"[Success] Patched '{path}'. ({msg})"
     except Exception as e:
         return f"[Error] Patch failed: {str(e)}"
+
 
 async def glob_files_tool(pattern: str, exclude: str = "**/node_modules/**,**/.git/**,**/__pycache__/**") -> str:
     """[Docker] Glob 递归查找"""
@@ -1659,88 +1741,26 @@ async def glob_files_tool_local(pattern: str, exclude: str = "") -> str:
         return f"[Error] Glob failed: {str(e)}"
 
 async def edit_file_patch_tool_local(path: str, old_string: str, new_string: str) -> str:
-    """[Local] 精确替换：自动处理换行符差异 (CRLF/LF) 与空白字符容错"""
+    """[Local] 精确替换（防膨胀版）"""
     try:
         cwd = await _get_current_cwd()
         target = resolve_strict_path(cwd, path, check_symlink=True)
-        
         if not target.exists():
             return f"[Error] File not found: {path}"
 
-        # 读取文件内容
         async with aiofiles.open(target, 'r', encoding='utf-8') as f:
             content = await f.read()
 
-        # --- 策略 1: 直接替换 (最快) ---
-        if old_string in content:
-            new_content = content.replace(old_string, new_string, 1)
-            async with aiofiles.open(target, 'w', encoding='utf-8') as f:
-                await f.write(new_content)
-            return "Patched successfully (Exact match)."
+        # 调用引擎处理
+        success, new_content, msg = _apply_patch(content, old_string, new_string)
+        if not success:
+            return msg
 
-        # --- 策略 2: 归一化换行符后替换 (处理 Windows/Linux 差异) ---
-        # 将所有 \r\n 转换为 \n 进行比对
-        content_normalized = content.replace('\r\n', '\n')
-        old_normalized = old_string.replace('\r\n', '\n')
-        new_normalized = new_string.replace('\r\n', '\n')
-
-        if old_normalized in content_normalized:
-            # 这里的难点是：如果我们在 normalized 版本中替换了，
-            # 我们需要把写回的内容最好保持原文件的换行符风格。
-            # 简单起见，我们统一写回 normalized 的内容 (Python write 通常会自动处理 OS 换行)
-            new_content_normalized = content_normalized.replace(old_normalized, new_normalized, 1)
-            async with aiofiles.open(target, 'w', encoding='utf-8') as f:
-                await f.write(new_content_normalized)
-            return "Patched successfully (Normalized line endings match)."
-
-        # --- 策略 3: 容错匹配 (忽略行尾空格) ---
-        # 如果还是找不到，尝试逐行对比，忽略 strip() 后的差异
-        lines = content.splitlines()
-        old_lines = old_string.splitlines()
-        
-        if not old_lines: return "[Error] old_string is empty."
-
-        # 简单的滑动窗口匹配
-        match_index = -1
-        for i in range(len(lines) - len(old_lines) + 1):
-            match = True
-            for j in range(len(old_lines)):
-                if lines[i+j].strip() != old_lines[j].strip():
-                    match = False
-                    break
-            if match:
-                match_index = i
-                break
-        
-        if match_index != -1:
-            # 找到了逻辑上匹配的块，进行替换
-            # 注意：这里我们使用 new_string (保持 AI 生成的格式)
-            # 但我们需要小心缩进。这里假设 AI 提供了正确的 new_string 缩进。
-            pre_content = "\n".join(lines[:match_index])
-            post_content = "\n".join(lines[match_index + len(old_lines):])
+        # 写回
+        async with aiofiles.open(target, 'w', encoding='utf-8') as f:
+            await f.write(new_content)
             
-            # 拼接时要注意原文件的换行符，这里简化为 \n
-            final_content = (pre_content + "\n" + new_string + "\n" + post_content).strip()
-            
-            async with aiofiles.open(target, 'w', encoding='utf-8') as f:
-                await f.write(final_content)
-            return "Patched successfully (Fuzzy match: ignored whitespace/indentation differences)."
-
-        # --- 失败：提供详细诊断信息 ---
-        # 帮助 AI 找到它可能想改的地方
-        first_line = old_lines[0].strip()[:50]
-        candidates = []
-        for i, line in enumerate(lines):
-            if first_line in line.strip():
-                candidates.append(f"Line {i+1}: {line.strip()[:80]}")
-        
-        error_msg = f"[Error] old_string not found in '{path}'.\n"
-        error_msg += "Check line endings or indentation.\n"
-        if candidates:
-            error_msg += "Did you mean one of these locations?\n" + "\n".join(candidates[:3])
-            
-        return error_msg
-
+        return f"[Success] Patched '{path}'. ({msg})"
     except Exception as e:
         return f"[Error] Patch failed: {str(e)}"
 
