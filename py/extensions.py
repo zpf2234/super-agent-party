@@ -120,30 +120,26 @@ def find_root_dir(temp_path: Path) -> Path:
     return temp_path
 
 
-def github_url_to_zip(url: str) -> str:
-    """将 GitHub/Gitee 仓库 URL 转换为 ZIP 下载链接"""
+def get_github_download_urls(url: str) -> List[str]:
+    """将 GitHub 仓库 URL 转换为 [直连 ZIP, Proxy 加速 ZIP]"""
     url = url.strip().rstrip('/').removesuffix('.git')
-    
     parsed = urlparse(url)
     path_parts = parsed.path.strip('/').split('/')
     
-    if len(path_parts) < 2:
-        raise ValueError(f"无效的仓库 URL: {url}")
+    if len(path_parts) < 2 or 'github.com' not in parsed.netloc.lower():
+        raise ValueError(f"不是有效的 GitHub 仓库 URL: {url}")
     
     owner, repo = path_parts[0], path_parts[1]
-    host = parsed.netloc.lower()
     
-    if 'github.com' in host:
-        return f"https://github.com/{owner}/{repo}/archive/refs/heads/main.zip"
-    elif 'gitee.com' in host:
-        return f"https://gitee.com/{owner}/{repo}/repository/archive/main.zip"
-    else:
-        return f"{url}/archive/refs/heads/main.zip"
+    # 使用 HEAD.zip 自动下载默认分支（完美避免 main vs master 命名带来的 404 问题）
+    direct_zip = f"https://github.com/{owner}/{repo}/archive/HEAD.zip"
+    proxy_zip = f"https://gh-proxy.com/{direct_zip}"
+    
+    return [direct_zip, proxy_zip]
 
 
 # ==================== 安装任务管理 ====================
 
-# 内存中的任务状态存储（生产环境建议用 Redis）
 install_tasks: Dict[str, Dict[str, Any]] = {}
 
 
@@ -174,13 +170,21 @@ class GitHubInstallRequest(BaseModel):
 # ==================== 核心安装逻辑 ====================
 
 async def download_zip(url: str, dest: Path, timeout: float = 60.0) -> None:
-    """异步下载 ZIP 文件"""
+    """异步下载 ZIP 文件并校验格式格式"""
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        async with client.stream("GET", url) as resp:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        async with client.stream("GET", url, headers=headers) as resp:
             resp.raise_for_status()
             with open(dest, "wb") as f:
                 async for chunk in resp.aiter_bytes():
                     f.write(chunk)
+                    
+    # 强制进行 ZIP 格式头部校验，确保下载到的不是代理返回的报错 HTML
+    with open(dest, "rb") as f:
+        if f.read(4) != b'PK\x03\x04':
+            raise ValueError("下载的文件格式不是有效的 ZIP (可能是网络错误或代理无法访问)")
 
 
 def _do_zip_install(zip_url: str, temp_dir: Path, target: Path, ext_id: str) -> None:
@@ -204,6 +208,7 @@ def _do_zip_install(zip_url: str, temp_dir: Path, target: Path, ext_id: str) -> 
     
     update_task_status(ext_id, "installing", "文件解压完成", 80)
 
+
 def _run_bg_install(repo_url: str, ext_id: str, backup_url: str = ""):
     """后台安装任务"""
     update_task_status(ext_id, "installing", "正在准备安装...", 0)
@@ -213,33 +218,16 @@ def _run_bg_install(repo_url: str, ext_id: str, backup_url: str = ""):
         target = Path(EXT_DIR) / ext_id
         target.parent.mkdir(parents=True, exist_ok=True)
         
-        urls = []
-        main = repo_url.strip().rstrip('/') if repo_url else ""
-        backup = backup_url.strip().rstrip('/') if backup_url else ""
-        
-        update_task_status(ext_id, "installing", "检测网络环境...", 10)
-        
-        # 测试 GitHub 连通性
+        update_task_status(ext_id, "installing", "正在解析下载路径...", 10)
         try:
-            import httpx
-            with httpx.Client(timeout=3) as c:
-                c.head("https://github.com")
-            if main:
-                urls.append(github_url_to_zip(main))
-            if backup:
-                urls.append(github_url_to_zip(backup))
-        except Exception:
-            if backup:
-                urls.append(github_url_to_zip(backup))
-            if main:
-                urls.append(github_url_to_zip(main))
-        
-        if not urls:
-            raise RuntimeError("没有可用的仓库地址")
+            urls = get_github_download_urls(repo_url)
+        except Exception as e:
+            raise RuntimeError(f"解析 GitHub URL 失败: {e}")
         
         last_err = None
         for i, zip_url in enumerate(urls):
-            update_task_status(ext_id, "installing", f"正在从源 {i+1}/{len(urls)} 下载...", 20)
+            source_name = "GitHub 直连" if i == 0 else "gh-proxy 代理"
+            update_task_status(ext_id, "installing", f"正在通过 {source_name} 下载...", 20 + i * 20)
             
             try:
                 _do_zip_install(zip_url, temp_dir, target, ext_id)
@@ -249,9 +237,7 @@ def _run_bg_install(repo_url: str, ext_id: str, backup_url: str = ""):
                 node_modules = target / "node_modules"
                 
                 if pkg_json.exists() and not node_modules.exists():
-                    update_task_status(ext_id, "installing", "正在安装 Node 依赖（可能需要几分钟）...", 85)
-                    # 这里可以调用 npm install，如果需要的话
-                    # 暂时跳过，由前端或下次启动时处理
+                    update_task_status(ext_id, "installing", "正在安装 Node 依赖...", 85)
                 
                 update_task_status(ext_id, "success", "安装完成", 100)
                 return
@@ -260,7 +246,7 @@ def _run_bg_install(repo_url: str, ext_id: str, backup_url: str = ""):
                 last_err = e
                 continue
         
-        raise RuntimeError(f"所有源均下载失败: {last_err}")
+        raise RuntimeError(f"直连和代理均下载失败: {last_err}")
         
     except Exception as e:
         update_task_status(ext_id, "error", str(e))
@@ -387,7 +373,7 @@ async def delete_extension(ext_id: str):
 
 @router.post("/install-from-github", response_model=InstallResponse)
 async def install_from_github(req: GitHubInstallRequest, background: BackgroundTasks):
-    """从 GitHub/Gitee 安装扩展（后台任务+轮询）"""
+    """从 GitHub 安装扩展（优先直连，若失败切换为 gh-proxy 代理）"""
     try:
         ext_id = get_ext_id_from_url(req.url)
     except ValueError as e:
@@ -402,7 +388,8 @@ async def install_from_github(req: GitHubInstallRequest, background: BackgroundT
     if ext_id in install_tasks and install_tasks[ext_id]["status"] == "installing":
         return InstallResponse(ext_id=ext_id, status="installing", message="安装任务已在进行中")
     
-    background.add_task(_run_bg_install, req.url, ext_id, req.backupUrl or "")
+    # 此时内部直接调用，忽略 req.backupUrl 逻辑，保持签名兼容
+    background.add_task(_run_bg_install, req.url, ext_id, "")
     return InstallResponse(ext_id=ext_id, status="installing", message="后台安装任务已启动")
 
 
@@ -411,7 +398,6 @@ async def get_task_status(ext_id: str):
     """查询安装任务状态"""
     status = install_tasks.get(ext_id)
     if not status:
-        # 检查是否已安装完成（任务可能被清理）
         target = Path(EXT_DIR) / ext_id
         if target.exists():
             return TaskStatusResponse(status="success", detail="已安装", timestamp=time.time())
@@ -449,7 +435,7 @@ async def upload_zip(file: UploadFile = File(...), background: BackgroundTasks =
 
 @router.put("/{ext_id}/update")
 def update_extension(ext_id: str):
-    """更新扩展（ZIP 方式，智能保留 node_modules）"""
+    """更新扩展（优先 GitHub 直连，失败则使用 gh-proxy 代理）"""
     target = Path(EXT_DIR) / ext_id
     if not target.exists():
         raise HTTPException(status_code=404, detail="扩展未安装")
@@ -460,23 +446,17 @@ def update_extension(ext_id: str):
     
     try:
         meta = json.loads(pkg_file.read_text(encoding="utf-8"))
-        repos = []
-        if meta.get("repository"):
-            repos.append(meta["repository"].strip().rstrip("/"))
-        if meta.get("backupRepository"):
-            repos.append(meta["backupRepository"].strip().rstrip("/"))
+        repo = meta.get("repository", "").strip()
     except Exception:
         raise HTTPException(status_code=400, detail="无法解析 package.json")
     
-    if not repos:
+    if not repo:
         raise HTTPException(status_code=400, detail="缺少 repository 信息")
     
     try:
-        with httpx.Client(timeout=3) as c:
-            c.head("https://github.com")
-        zip_urls = [github_url_to_zip(r) for r in repos]
-    except Exception:
-        zip_urls = [github_url_to_zip(r) for r in reversed(repos)]
+        zip_urls = get_github_download_urls(repo)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     temp_dir = Path(tempfile.mkdtemp())
     last_err = None
@@ -515,12 +495,13 @@ class RemotePluginList(BaseModel):
 
 @router.get("/remote-list", response_model=RemotePluginList)
 async def remote_plugin_list():
-    """获取远程插件列表"""
-    github_raw = "https://raw.githubusercontent.com/super-agent-party/super-agent-party.github.io/main/plugins.json"
-    gitee_raw = "https://gitee.com/super-agent-party/super-agent-party.github.io/raw/main/plugins.json"
+    """获取远程插件列表 (国内优先使用国内加速代理读取配置)"""
+    # 优先采用 GitHub Raw 加速镜像代理读取配置文件，若失败再退回直连
+    raw_url = "https://raw.githubusercontent.com/super-agent-party/super-agent-party.github.io/main/plugins.json"
+    proxy_raw_url = f"https://gh-proxy.com/{raw_url}"
     
     remote = None
-    for url in (github_raw, gitee_raw):
+    for url in (raw_url, proxy_raw_url):
         try:
             async with httpx.AsyncClient(timeout=10) as cli:
                 r = await cli.get(url)
@@ -528,12 +509,13 @@ async def remote_plugin_list():
                 remote = r.json()
                 break
         except Exception:
-            if url == gitee_raw:
-                raise HTTPException(
-                    status_code=502,
-                    detail="无法获取远程插件列表"
-                )
             continue
+            
+    if not remote:
+        raise HTTPException(
+            status_code=502,
+            detail="无法获取远程插件列表，请检查网络设置"
+        )
     
     try:
         local_res = await list_extensions()
