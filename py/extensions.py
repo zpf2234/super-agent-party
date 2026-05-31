@@ -120,25 +120,55 @@ def find_root_dir(temp_path: Path) -> Path:
     return temp_path
 
 
-def github_url_to_zip(url: str) -> str:
-    """将 GitHub/Gitee 仓库 URL 转换为 ZIP 下载链接"""
+def get_github_url(url: str) -> Optional[str]:
+    """提取 GitHub 官方直连下载链接（使用不限分支名的 HEAD.zip）"""
     url = url.strip().rstrip('/').removesuffix('.git')
-    
     parsed = urlparse(url)
     path_parts = parsed.path.strip('/').split('/')
+    if 'github.com' in parsed.netloc.lower() and len(path_parts) >= 2:
+        owner, repo = path_parts[0], path_parts[1]
+        return f"https://github.com/{owner}/{repo}/archive/HEAD.zip"
+    return None
+
+
+def get_backup_urls(main_url: str, backup_url: str = "") -> List[str]:
+    """
+    获取备用下载链接。
+    若主库为 GitHub 且未指定备用库，则自动将其转换为极狐 GitLab 的标准下载直链 [1]。
+    """
+    main_url = main_url.strip().rstrip('/').removesuffix('.git')
+    parsed_main = urlparse(main_url)
+    main_parts = parsed_main.path.strip('/').split('/')
     
-    if len(path_parts) < 2:
-        raise ValueError(f"无效的仓库 URL: {url}")
+    urls = []
     
-    owner, repo = path_parts[0], path_parts[1]
-    host = parsed.netloc.lower()
-    
-    if 'github.com' in host:
-        return f"https://github.com/{owner}/{repo}/archive/refs/heads/main.zip"
-    elif 'gitee.com' in host:
-        return f"https://gitee.com/{owner}/{repo}/repository/archive/main.zip"
-    else:
-        return f"{url}/archive/refs/heads/main.zip"
+    # 1. 如果指定了显式备用链接
+    explicit_backup = backup_url.strip().rstrip('/').removesuffix('.git') if backup_url else ""
+    if explicit_backup:
+        parsed_backup = urlparse(explicit_backup)
+        backup_parts = parsed_backup.path.strip('/').split('/')
+        if len(backup_parts) >= 2:
+            b_owner, b_repo = backup_parts[0], backup_parts[1]
+            b_host = parsed_backup.netloc.lower()
+            if 'jihulab.com' in b_host:
+                urls.append(f"https://jihulab.com/{b_owner}/{b_repo}/-/archive/main/{b_repo}-main.zip")
+                urls.append(f"https://jihulab.com/{b_owner}/{b_repo}/-/archive/master/{b_repo}-master.zip")
+            else:
+                urls.append(f"{explicit_backup}/archive/refs/heads/main.zip")
+                urls.append(f"{explicit_backup}/archive/refs/heads/master.zip")
+                
+    # 2. 如果主库是 GitHub 且未提供显式备用链接，自动将其转换为极狐 GitLab 备用链接 [1]
+    elif 'github.com' in parsed_main.netloc.lower() and len(main_parts) >= 2:
+        owner, repo = main_parts[0], main_parts[1]
+        urls.append(f"https://jihulab.com/{owner}/{repo}/-/archive/main/{repo}-main.zip")
+        urls.append(f"https://jihulab.com/{owner}/{repo}/-/archive/master/{repo}-master.zip")
+        
+    # 3. 兜底通用备份路径
+    if not urls:
+        urls.append(f"{main_url}/archive/refs/heads/main.zip")
+        urls.append(f"{main_url}/archive/refs/heads/master.zip")
+        
+    return urls
 
 
 # ==================== 安装任务管理 ====================
@@ -174,13 +204,21 @@ class GitHubInstallRequest(BaseModel):
 # ==================== 核心安装逻辑 ====================
 
 async def download_zip(url: str, dest: Path, timeout: float = 60.0) -> None:
-    """异步下载 ZIP 文件"""
+    """异步下载 ZIP 文件并增加魔法头校验（防网络拦截/报错转网页导致的解压崩溃）"""
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        async with client.stream("GET", url) as resp:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        async with client.stream("GET", url, headers=headers) as resp:
             resp.raise_for_status()
             with open(dest, "wb") as f:
                 async for chunk in resp.aiter_bytes():
                     f.write(chunk)
+                    
+    # 校验 ZIP 压缩包头部
+    with open(dest, "rb") as f:
+        if f.read(4) != b'PK\x03\x04':
+            raise ValueError("下载文件不是合法的 ZIP 压缩包 (可能链接失效或被网络拦截)")
 
 
 def _do_zip_install(zip_url: str, temp_dir: Path, target: Path, ext_id: str) -> None:
@@ -204,6 +242,7 @@ def _do_zip_install(zip_url: str, temp_dir: Path, target: Path, ext_id: str) -> 
     
     update_task_status(ext_id, "installing", "文件解压完成", 80)
 
+
 def _run_bg_install(repo_url: str, ext_id: str, backup_url: str = ""):
     """后台安装任务"""
     update_task_status(ext_id, "installing", "正在准备安装...", 0)
@@ -213,33 +252,42 @@ def _run_bg_install(repo_url: str, ext_id: str, backup_url: str = ""):
         target = Path(EXT_DIR) / ext_id
         target.parent.mkdir(parents=True, exist_ok=True)
         
-        urls = []
-        main = repo_url.strip().rstrip('/') if repo_url else ""
-        backup = backup_url.strip().rstrip('/') if backup_url else ""
-        
         update_task_status(ext_id, "installing", "检测网络环境...", 10)
         
-        # 测试 GitHub 连通性
+        github_url = get_github_url(repo_url)
+        backup_urls = get_backup_urls(repo_url, backup_url)
+        
+        urls = []
+        github_connected = False
+        
+        # 3秒短暂测试 GitHub 连通性 [1]
         try:
             import httpx
             with httpx.Client(timeout=3) as c:
                 c.head("https://github.com")
-            if main:
-                urls.append(github_url_to_zip(main))
-            if backup:
-                urls.append(github_url_to_zip(backup))
+            github_connected = True
         except Exception:
-            if backup:
-                urls.append(github_url_to_zip(backup))
-            if main:
-                urls.append(github_url_to_zip(main))
+            github_connected = False
+        
+        # 根据连通性动态排列下载源顺序 [1]
+        if github_connected:
+            # 连通时：GitHub 优先，极狐 GitLab 备用 [1]
+            if github_url:
+                urls.append(github_url)
+            urls.extend(backup_urls)
+        else:
+            # 阻塞时：极狐 GitLab 优先，GitHub 直连在最后尝试 [1]
+            urls.extend(backup_urls)
+            if github_url:
+                urls.append(github_url)
         
         if not urls:
             raise RuntimeError("没有可用的仓库地址")
         
         last_err = None
         for i, zip_url in enumerate(urls):
-            update_task_status(ext_id, "installing", f"正在从源 {i+1}/{len(urls)} 下载...", 20)
+            source_name = "GitHub 直连" if "github.com" in zip_url else "极狐 GitLab" if "jihulab.com" in zip_url else "备用源"
+            update_task_status(ext_id, "installing", f"正在从 {source_name} 下载 (尝试 {i+1}/{len(urls)})...", 20 + i * 20)
             
             try:
                 _do_zip_install(zip_url, temp_dir, target, ext_id)
@@ -249,9 +297,7 @@ def _run_bg_install(repo_url: str, ext_id: str, backup_url: str = ""):
                 node_modules = target / "node_modules"
                 
                 if pkg_json.exists() and not node_modules.exists():
-                    update_task_status(ext_id, "installing", "正在安装 Node 依赖（可能需要几分钟）...", 85)
-                    # 这里可以调用 npm install，如果需要的话
-                    # 暂时跳过，由前端或下次启动时处理
+                    update_task_status(ext_id, "installing", "正在安装 Node 依赖...", 85)
                 
                 update_task_status(ext_id, "success", "安装完成", 100)
                 return
@@ -387,7 +433,7 @@ async def delete_extension(ext_id: str):
 
 @router.post("/install-from-github", response_model=InstallResponse)
 async def install_from_github(req: GitHubInstallRequest, background: BackgroundTasks):
-    """从 GitHub/Gitee 安装扩展（后台任务+轮询）"""
+    """从 GitHub/极狐 GitLab 安装扩展（动态网络测速分发）"""
     try:
         ext_id = get_ext_id_from_url(req.url)
     except ValueError as e:
@@ -411,7 +457,7 @@ async def get_task_status(ext_id: str):
     """查询安装任务状态"""
     status = install_tasks.get(ext_id)
     if not status:
-        # 检查是否已安装完成（任务可能被清理）
+        # 检查是否已安装完成
         target = Path(EXT_DIR) / ext_id
         if target.exists():
             return TaskStatusResponse(status="success", detail="已安装", timestamp=time.time())
@@ -422,7 +468,7 @@ async def get_task_status(ext_id: str):
 
 @router.post("/upload-zip", response_model=InstallResponse)
 async def upload_zip(file: UploadFile = File(...), background: BackgroundTasks = None):
-    """上传本地 ZIP 安装扩展（改为后台任务+轮询模式）"""
+    """上传本地 ZIP 安装扩展"""
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="仅支持 zip 文件")
     
@@ -449,7 +495,7 @@ async def upload_zip(file: UploadFile = File(...), background: BackgroundTasks =
 
 @router.put("/{ext_id}/update")
 def update_extension(ext_id: str):
-    """更新扩展（ZIP 方式，智能保留 node_modules）"""
+    """更新扩展（智能连通性测速 + 备用路由）"""
     target = Path(EXT_DIR) / ext_id
     if not target.exists():
         raise HTTPException(status_code=404, detail="扩展未安装")
@@ -460,29 +506,42 @@ def update_extension(ext_id: str):
     
     try:
         meta = json.loads(pkg_file.read_text(encoding="utf-8"))
-        repos = []
-        if meta.get("repository"):
-            repos.append(meta["repository"].strip().rstrip("/"))
-        if meta.get("backupRepository"):
-            repos.append(meta["backupRepository"].strip().rstrip("/"))
+        main_repo = meta.get("repository", "").strip()
+        backup_repo = meta.get("backupRepository", "").strip()
     except Exception:
         raise HTTPException(status_code=400, detail="无法解析 package.json")
     
-    if not repos:
+    if not main_repo:
         raise HTTPException(status_code=400, detail="缺少 repository 信息")
     
+    github_url = get_github_url(main_repo)
+    backup_urls = get_backup_urls(main_repo, backup_repo)
+    
+    urls = []
+    github_connected = False
+    
+    # 3秒测试 GitHub 连通性 [1]
     try:
         with httpx.Client(timeout=3) as c:
             c.head("https://github.com")
-        zip_urls = [github_url_to_zip(r) for r in repos]
+        github_connected = True
     except Exception:
-        zip_urls = [github_url_to_zip(r) for r in reversed(repos)]
-    
+        github_connected = False
+        
+    if github_connected:
+        if github_url:
+            urls.append(github_url)
+        urls.extend(backup_urls)
+    else:
+        urls.extend(backup_urls)
+        if github_url:
+            urls.append(github_url)
+            
     temp_dir = Path(tempfile.mkdtemp())
     last_err = None
     
     try:
-        for zip_url in zip_urls:
+        for zip_url in urls:
             try:
                 _do_zip_install(zip_url, temp_dir, target, ext_id)
                 return {"status": "updated", "source": zip_url}
