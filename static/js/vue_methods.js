@@ -206,16 +206,20 @@ let vue_methods = {
       window.electronAPI.downloadUpdate();
     }
   },
-  formatFileUrl(originalUrl) {
+formatFileUrl(originalUrl) {
     if (!this.isElectron) {
       try {
         const url = new URL(originalUrl);
         // 替换0.0.0.0为当前域名
         if (url.hostname === '0.0.0.0' || url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
           url.hostname = window.location.hostname;
-          // 如果需要强制使用HTTPS可以添加：
           url.protocol = window.location.protocol;
-          url.port = window.location.port;
+          
+          // ✨ 修复点：仅当原链接没有端口，或者是默认端口 3456、当前激活端口时才重写端口
+          const isBackendPort = url.port === '' || url.port === '3456' || url.port === window.location.port;
+          if (isBackendPort) {
+            url.port = window.location.port;
+          }
         }
         return url.toString();
       } catch(e) {
@@ -227,9 +231,13 @@ let vue_methods = {
         const url = new URL(originalUrl);
         if (url.hostname === '127.0.0.1') {
           url.hostname = "localhost";
-          // 如果需要强制使用HTTPS可以添加：
           url.protocol = window.location.protocol;
-          url.port = window.location.port;
+          
+          // ✨ 修复点：仅当原链接没有端口，或者是默认端口 3456、当前激活端口时才重写端口
+          const isBackendPort = url.port === '' || url.port === '3456' || url.port === window.location.port;
+          if (isBackendPort) {
+            url.port = window.location.port;
+          }
         }
         return url.toString();
       } catch(e) {

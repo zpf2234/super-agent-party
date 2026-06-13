@@ -862,6 +862,16 @@ async def lifespan(app: FastAPI):
     print("System shutting down, cleaning up...")
 
     try:
+        # 注意：此处需要根据您实际的文件结构导入 process_manager
+        # 假设上述 ProcessManager 代码保存在 py/agent_tool.py 中
+        from py.cli_tool import process_manager 
+        
+        print("正在清理工具管理的后台进程...")
+        await process_manager.kill_all()
+    except Exception as e:
+        print(f"清理后台进程时发生异常: {e}")
+
+    try:
         await asyncio.to_thread(sleep_guard.stop)
         print("🛡️ 防休眠保护已停止，系统将恢复正常休眠策略")
     except Exception as e:
@@ -873,7 +883,7 @@ async def lifespan(app: FastAPI):
     for ext_id in ext_ids:
         try: await node_mgr.stop(ext_id)
         except: pass
-        
+
     if global_http_client:
         await global_http_client.aclose()
     print("All processes terminated.")

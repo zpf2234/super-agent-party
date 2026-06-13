@@ -558,6 +558,33 @@ class ProcessManager:
         except Exception as e:
             return f"Error terminating process {pid}: {str(e)}"
         
+    async def kill_all(self):
+        """
+        关闭所有注册在管理器中的活动进程。
+        """
+        active_pids = []
+        for pid, info in list(self._processes.items()):
+            # 过滤掉已经退出的进程
+            status = info.get("status", "")
+            if "exited" not in status and "terminated" not in status:
+                active_pids.append(pid)
+        
+        if not active_pids:
+            return "No active processes to clean up."
+            
+        print(f"Found {len(active_pids)} active background processes. Terminating...")
+        
+        # 并发执行清理任务
+        tasks = [self.kill_process(pid) for pid in active_pids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 打印清理结果
+        for pid, res in zip(active_pids, results):
+            if isinstance(res, Exception):
+                print(f"[Warn] Failed to kill process {pid}: {res}")
+            else:
+                print(f"[Info] Process cleanup: {res}")
+
 process_manager = ProcessManager()
 
 # ==================== [新增] 核心基础设施：Docker 网络代理 ====================
