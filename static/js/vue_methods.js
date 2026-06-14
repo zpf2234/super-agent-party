@@ -2059,6 +2059,7 @@ formatMessage(content, index) {
           this.comfyuiAPIkey = data.data.comfyuiAPIkey || this.comfyuiAPIkey;
           this.workflows = data.data.workflows || this.workflows;
           this.customHttpTools = data.data.custom_http || this.customHttpTools;
+          this.systemSettings = data.data.systemSettings || this.systemSettings;
       }
       else if (data.type === 'settings') {
           this.ensureConversationGroups();
