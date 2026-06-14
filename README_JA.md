@@ -43,7 +43,7 @@
 ![image](doc/image/img-2/vts.jpeg)
 
 #### 高自由度チャットインターフェース：背景画像のカスタマイズ、スタンプ、キャラクター設定、THAベースの2Dキャラクターイメージ、キャラクターMCPツールにより、より没入感のあるチャットを実現
-![image](doc/image/img-2/THA.jpeg)
+![image](doc/image/img-2/tha4.jpeg)
 
 #### タスクセンター：AIエージェントにバックグラウンドで高度なタスクを実行させ、自動的にコンピュータを制御して作業を完了させます。MCPとAgent Skillsに対応。
 ![image](doc/image/img-2/task.jpeg)
