@@ -1195,18 +1195,20 @@ formatFileUrl(originalUrl) {
     },
 
     throttledUpdate(index, newContent) {
-      // 更新原始数据
       this.messages[index].content = newContent;
-      
-      // 如果已经有定时器在跑，则跳过（防抖）
+      if (!this._pendingRenderContent) this._pendingRenderContent = {};
+      this._pendingRenderContent[index] = newContent;
+
       if (this.renderTimers[index]) return;
 
       this.renderTimers[index] = setTimeout(() => {
-        // 执行真正的渲染
-        this.messages[index].renderedHtml = this.formatMessage(newContent, index);
-        // 清除定时器
+        const latestContent = this._pendingRenderContent[index];
+        if (latestContent !== undefined) {
+          this.messages[index].renderedHtml = this.formatMessage(latestContent, index);
+        }
         this.renderTimers[index] = null;
-      }, 80); // 80ms 延迟，约等于 12fps，人眼感觉流畅且不卡顿
+        this._pendingRenderContent[index] = undefined;
+      }, 16);
     },
 
 
@@ -2906,7 +2908,7 @@ formatMessage(content, index) {
         };
 
         try {
-            const fetchTimeoutMs = 120000;
+            const fetchTimeoutMs = 300000;
             const abortSignal = this.abortController.signal;
             const timeoutSignal = AbortSignal.timeout(fetchTimeoutMs);
             const combinedSignal = AbortSignal.any([abortSignal, timeoutSignal]);
@@ -2934,11 +2936,11 @@ formatMessage(content, index) {
                 throw new Error(errText);
             }
 
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
+            const contentType = response.headers.get('content-type') || '';
+            if (!contentType.includes('text/event-stream')) {
                 let errText = await response.text();
                 try { const errObj = JSON.parse(errText); errText = errObj.error?.message || errText; } catch (e) { }
-                throw new Error(errText);
+                throw new Error(errText || 'Server returned non-streaming response');
             }
 
             const reader = response.body.getReader();
@@ -2948,8 +2950,10 @@ formatMessage(content, index) {
             // 初始化流式文本批量更新状态
             this._streamTargetMsg = currentMsg;
             this._streamTextBuffer = '';
+            this._typewriterSpeed = 30;
+            this._startTypewriterTick();
             this.first_token = true;
-            const readTimeoutMs = 60000;
+            const readTimeoutMs = 120000;
             let streamFinished = false;
             while (true) {
                 if (this.abortController?.signal.aborted) break;
@@ -3008,11 +3012,6 @@ formatMessage(content, index) {
                                 currentMsg.backend_content.push(lastBackend);
                             }
                             lastBackend.reasoning_content = (lastBackend.reasoning_content || '') + delta.reasoning_content;
-                            // 防抖合并到 displayBlocks
-                            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
-                            this._streamUpdateTimer = setTimeout(() => {
-                                this.flushStreamTextBuffer();
-                            }, 80);
                         }
 
                         // B. 处理文本 (Content) —— 流式防抖更新
@@ -3074,11 +3073,6 @@ formatMessage(content, index) {
                                 }
                             }
 
-                            // 防抖合并到 displayBlocks
-                            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
-                            this._streamUpdateTimer = setTimeout(() => {
-                                this.flushStreamTextBuffer();
-                            }, 80);
                         }
 
                         // C. 工具 Loading 状态 (tool_progress) —— 只更新 displayBlocks
@@ -3294,8 +3288,9 @@ formatMessage(content, index) {
                 if (streamFinished) break;
             }
 
-            // 循环结束后，强制刷新缓冲区中剩余的文字
-            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+            // 循环结束后，停止打字机动画并强制刷新剩余文字
+            this._typewriterRunning = false;
+            if (this._typewriterRafId) cancelAnimationFrame(this._typewriterRafId);
             this.flushStreamTextBuffer();
 
             // === 核心修改：强制刷新流式状态机中的所有残留文本 ===
@@ -3443,10 +3438,11 @@ formatMessage(content, index) {
                 delete currentMsg._ttsState;
             }
 
-            // 清理流式缓冲区状态
+            // 清理流式缓冲区状态及打字机动画
+            this._typewriterRunning = false;
+            if (this._typewriterRafId) { cancelAnimationFrame(this._typewriterRafId); this._typewriterRafId = null; }
             this._streamTargetMsg = null;
             this._streamTextBuffer = '';
-            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
         }
     },
 
@@ -3818,7 +3814,50 @@ formatMessage(content, index) {
         }
     },
 
-    // 3. 流式文本批量更新（防抖 80ms）
+    // 3. 打字机逐字渲染（requestAnimationFrame 驱动，丝滑流畅）
+    _startTypewriterTick() {
+        if (this._typewriterRunning) return;
+        this._typewriterRunning = true;
+        this._tickTypewriter();
+    },
+
+    _tickTypewriter() {
+        if (!this._typewriterRunning) return;
+
+        const msg = this._streamTargetMsg;
+        if (!msg) { this._typewriterRunning = false; return; }
+
+        const buffer = this._streamTextBuffer || '';
+
+        if (buffer.length > 0) {
+            const chunk = buffer.slice(0, this._typewriterSpeed);
+            this._streamTextBuffer = buffer.slice(this._typewriterSpeed);
+
+            const block = this.getBlockForMsg(msg, 'text');
+            if (block) {
+                const MAX_TEXT_CONTENT = 150000;
+                if (block.content.length < MAX_TEXT_CONTENT) {
+                    block.content += chunk;
+                } else if (!block.content.endsWith('\n... (Truncated)')) {
+                    block.content += '\n... (Truncated)';
+                }
+                block.segments = this.splitMessageContent(block.content);
+                if (msg.pure_content.length < MAX_TEXT_CONTENT) {
+                    msg.pure_content += chunk;
+                }
+                msg.content += chunk;
+                msg.segments = this.splitMessageContent(msg.content);
+            }
+            this.requestScrollToBottom();
+        }
+
+        if (buffer.length > 0 || (this.isTyping && this.isSending)) {
+            this._typewriterRafId = requestAnimationFrame(() => this._tickTypewriter());
+        } else {
+            this._typewriterRunning = false;
+        }
+    },
+
     flushStreamTextBuffer() {
         if (this._streamTargetMsg && this._streamTextBuffer) {
             const block = this.getBlockForMsg(this._streamTargetMsg, 'text');
@@ -3829,14 +3868,11 @@ formatMessage(content, index) {
                 } else if (!block.content.endsWith('\n... (Truncated)')) {
                     block.content += '\n... (Truncated)';
                 }
-                
                 block.segments = this.splitMessageContent(block.content);
-                
                 if (this._streamTargetMsg.pure_content.length < MAX_TEXT_CONTENT) {
                     this._streamTargetMsg.pure_content += this._streamTextBuffer;
                 }
                 this._streamTargetMsg.content += this._streamTextBuffer;
-                
                 this._streamTargetMsg.segments = this.splitMessageContent(this._streamTargetMsg.content);
             }
             this._streamTextBuffer = '';
@@ -4279,6 +4315,8 @@ formatMessage(content, index) {
       }
     },
     stopGenerate() {
+      this._typewriterRunning = false;
+      if (this._typewriterRafId) { cancelAnimationFrame(this._typewriterRafId); this._typewriterRafId = null; }
       if (this.abortController) {
         this.abortController.abort();
       }

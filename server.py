@@ -429,7 +429,7 @@ import time
 from typing import Any, AsyncIterator, List, Dict,Optional, Tuple, Union
 import shortuuid
 from py.mcp_clients import McpClient
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from concurrent.futures import ThreadPoolExecutor
 import aiofiles
 import argparse
@@ -3066,6 +3066,50 @@ def sanitize_tool_calls(messages: list) -> list:
 
     return msgs
 
+async def heartbeat_wrapper(gen, interval=90):
+    """Wraps an async generator to yield SSE heartbeat comments periodically,
+    preventing frontend read timeouts during long-thinking intervals."""
+    queue = asyncio.Queue()
+
+    async def reader():
+        try:
+            async for chunk in gen:
+                await queue.put(('data', chunk))
+        except Exception as e:
+            await queue.put(('error', e))
+        finally:
+            await queue.put(('done', None))
+
+    async def heartbeat():
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await queue.put(('heartbeat', None))
+        except asyncio.CancelledError:
+            pass
+
+    gen_task = asyncio.create_task(reader())
+    hb_task = asyncio.create_task(heartbeat())
+
+    try:
+        while True:
+            kind, payload = await queue.get()
+            if kind == 'data':
+                yield payload
+            elif kind == 'heartbeat':
+                yield ": heartbeat\n\n"
+            elif kind == 'error':
+                raise payload
+            elif kind == 'done':
+                break
+    finally:
+        hb_task.cancel()
+        gen_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await hb_task
+        with suppress(asyncio.CancelledError):
+            await gen_task
+
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
@@ -5391,7 +5435,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 return
         
         return StreamingResponse(
-            stream_generator(user_prompt, DRS_STAGE, tools, images),
+            heartbeat_wrapper(stream_generator(user_prompt, DRS_STAGE, tools, images)),
             media_type="text/event-stream",
             headers={
                 "Content-Type": "text/event-stream",
