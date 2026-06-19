@@ -1334,11 +1334,12 @@ let vue_data = {
     roleTiles:[
         { id: 'memory', title: 'CharacterMemory', icon: 'fa-solid fa-brain' },
         // { id: 'mind', title: 'CharacterMind', icon: 'fa-solid fa-heart' },
+        { id: 'sticker', title: 'sticker/image', icon: 'fa-solid fa-face-smile' },
+        { id: 'affection', title: 'affectionSystem', icon: 'fa-solid fa-heart' },
+        { id: 'vision', title: 'CharacterVision', icon: 'fa-solid fa-eye'},
+        { id: 'behavior', title: 'CharacterBehavior', icon: 'fa-solid fa-person-running' },
         { id: 'voice', title: 'CharacterVoice', icon: 'fa-solid fa-volume-high' },
         { id: 'appearance', title: 'CharacterAppearance', icon: 'fa-solid fa-person' },
-        { id: 'behavior', title: 'CharacterBehavior', icon: 'fa-solid fa-person-running' },
-        { id: 'vision', title: 'CharacterVision', icon: 'fa-solid fa-eye'},
-        { id: 'affection', title: 'affectionSystem', icon: 'fa-solid fa-heart' },
     ],
     modelTiles: [
       { id: 'service', title: 'modelService', icon: 'fa-solid fa-cloud' },
@@ -1354,8 +1355,7 @@ let vue_data = {
       { id: 'tools', title: 'utilityTools', icon: 'fa-solid fa-screwdriver-wrench' },
       { id: 'websearch', title: 'webSearch', icon: 'fa-solid fa-globe' },
       { id: 'document', title: 'knowledgeBase', icon: 'fa-solid fa-book' },
-      { id: 'sticker', title: 'sticker/image', icon: 'fa-solid fa-face-smile'},
-      { id: 'interpreter', title: 'interpreter', icon: 'fa-solid fa-code'},
+        { id: 'interpreter', title: 'interpreter', icon: 'fa-solid fa-code'},
       { id: 'CLI', title: 'CLItool', icon: 'fa-solid fa-computer'},
       { id: 'visionControl', title: 'visionControl', icon: 'fa-solid fa-arrow-pointer'},
       { id: 'HA', title: 'homeAssistant', icon: 'fa-solid fa-house'},
@@ -1370,7 +1370,6 @@ let vue_data = {
     apiTiles: [
       { id: 'openai', title: 'openaiStyleAPI', icon: 'fa-solid fa-link' },
       { id: 'mcp', title: 'MCPStyleAPI', icon: 'fa-solid fa-server' },
-      { id: 'vrm', title: 'vrmAPI', icon: 'fa-solid fa-user-ninja' },
       { id: 'agents', title: 'agentSnapshot', icon: 'fa-solid fa-robot'},
       { id: 'docker', title: 'docker', icon: 'fa-solid fa-box'},
       { id: 'browser', title: 'browserMode', icon: 'fa-solid fa-globe' },
