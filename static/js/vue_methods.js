@@ -414,8 +414,16 @@ formatFileUrl(originalUrl) {
       this.subMenu = 'comfyui';
     },
     switchToStickerPacks() {
-      this.activeMenu = 'toolkit';
+      this.activeMenu = 'role';
       this.subMenu = 'sticker';
+    },
+    switchToVisionControl() {
+      this.activeMenu = 'toolkit';
+      this.subMenu = 'visionControl';
+    },
+    switchToDesktopVision() {
+      this.activeMenu = 'role';
+      this.subMenu = 'vision';
     },
     switchToMainAgent() {
       this.activeMenu = 'api-group';
@@ -4596,6 +4604,15 @@ formatMessage(content, index) {
     },
     copyVrmEndpoint(){
       navigator.clipboard.writeText(`${this.partyURL}/vrm.html`)
+        .then(() => {
+          showNotification(this.t('copy_success'), 'success');
+        })
+        .catch(() => {
+          showNotification(this.t('copy_fail'), 'error');
+        });
+    },
+    copyTHAEndpoint(){
+      navigator.clipboard.writeText(`${this.partyURL}/tha.html`)
         .then(() => {
           showNotification(this.t('copy_success'), 'success');
         })

@@ -2731,7 +2731,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                         <el-switch v-model="newTaskForm.trigger_config.isInfiniteLoop"></el-switch>
                       </el-form-item>
                     </div>
-                  </el-form>
+                    </el-form>
                 </div>
                 <template #footer>
                   <span class="dialog-footer">
@@ -5757,6 +5757,24 @@ function updateElement(el, rawMarkdown, formatFn) {
                       <el-switch v-model="visionSettings.desktopVision" @click.stop @change="autoSaveSettings"/>
                     </div>
                     <div class="tool-content">
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        <template #default>
+                          <div class="alert-content">
+                            {{ t('visionToVisionControlHint') }}
+                            <el-link
+                              type="primary"
+                              :underline="false"
+                              @click="switchToVisionControl"
+                            >
+                              {{ t('gotoVisionControl') }}
+                            </el-link>
+                          </div>
+                        </template>
+                      </el-alert>
                       <el-form-item v-if="isElectron" :label="t('enableDesktopVisionWakeWord')" class="form-item-align" label-position="left">
                         <el-switch 
                           v-model="visionSettings.enableWakeWord" 
@@ -5941,6 +5959,103 @@ function updateElement(el, rawMarkdown, formatFn) {
                   </el-tab-pane>
 
                 </el-tabs>
+              </div>
+              <!-- 新增表情包界面 -->
+              <div v-show="subMenu === 'sticker'" class="page">
+                <div class="provider-grid">
+                  <!-- 已有表情包库 -->
+                  <div 
+                    v-for="pack in stickerPacks" 
+                    :key="pack.id"
+                    class="provider-card knowledge-card">
+                    <div class="card-header">
+                      <el-switch v-model="pack.enabled"></el-switch>
+                      <div class="card-actions">
+                        <el-button @click="deleteStickerPack(pack)" type="danger" circle size="small">
+                          <i class="fa-solid fa-trash"></i>
+                        </el-button>
+                      </div>
+                    </div>
+                    <div class="kb-content">
+                      <div class="kb-header">
+                        <h3 class="kb-title">{{ pack.name }}</h3>
+                        <el-tag v-if="pack.stickers?.length" type="info" size="small" effect="dark">
+                          {{ pack.stickers.length }} {{ t('images') }}
+                        </el-tag>
+                      </div>
+                      <div class="kb-meta">
+                        <img :src="pack.cover" class="cover-image" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 添加新表情包库 -->
+                  <div class="provider-card add-tile" @click="showStickerDialog = true">
+                    <el-icon :size="40" color="#909399">
+                      <i class="fa-solid fa-plus"></i>
+                    </el-icon>
+                    <div style="color: #606266; margin-top: 10px;">{{ t('addStickerPack') }}</div>
+                  </div>
+                </div>
+
+                <!-- 表情包创建对话框 -->
+                <el-dialog append-to-body
+                  v-model="showStickerDialog"
+                  :title="t('createStickerPack')"
+                  width="80%">
+                  <el-form label-position="top">
+                    <el-form-item :label="t('packName')" required>
+                      <el-input v-model="newStickerPack.name" />
+                    </el-form-item>
+
+                    <el-form-item :label="t('uploadStickers')" required>
+                      <div class="sticker-upload">
+                        <el-upload
+                          multiple
+                          list-type="picture-card"
+                          :file-list="uploadedStickers"
+                          :before-upload="handleBeforeUpload"
+                          :on-remove="handleStickerRemove"
+                          :on-preview="handlePictureCardPreview"
+                        >
+                          <el-icon><i class="fa-solid fa-plus"></i></el-icon>
+                        </el-upload>
+                      </div>
+                    </el-form-item>
+
+                    <!-- 预览弹窗 -->
+                    <el-dialog append-to-body v-model="dialogVisible" width="80%">
+                      <img :src="imageUrl" style="width: 100%" alt="Preview">
+                    </el-dialog>
+
+                    <el-form-item :label="t('imageDescription')" required>
+                      <div class="tag-editor">
+                        <div class="tag-item" 
+                            v-for="(sticker, index) in uploadedStickers" 
+                            :key="index">
+                          <img :src="sticker.url" class="sticker-thumb" />
+                          <el-input
+                            type="textarea"
+                            :rows="2"
+                            v-model="sticker.description"
+                            :placeholder="t('enterDescriptionPlaceholder')"
+                          />
+                        </div>
+                      </div>
+                    </el-form-item>
+                  </el-form>
+
+                  <template #footer>
+                    <el-button @click="cancelStickerUpload">{{ t('cancel') }}</el-button>
+                    <el-button 
+                      type="primary"
+                      @click="createStickerPack"
+                      :disabled="!newStickerPack.name || uploadedStickers.length === 0"
+                      >
+                      {{ t('createImmediately') }}
+                    </el-button>
+                  </template>
+                </el-dialog>
               </div>
 
               <!-- 新增/编辑用户数据对话框 (放在 tabs 外面) -->
@@ -9621,6 +9736,24 @@ function updateElement(el, rawMarkdown, formatFn) {
                       <el-switch v-model="visionControlSettings.enabled" @click.stop @change="handleVisionControlEnableToggle(visionControlSettings.enabled)"/>
                     </div>
                     <div class="tool-content">
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        <template #default>
+                          <div class="alert-content">
+                            {{ t('visionControlToVisionHint') }}
+                            <el-link
+                              type="primary"
+                              :underline="false"
+                              @click="switchToDesktopVision"
+                            >
+                              {{ t('gotoDesktopVision') }}
+                            </el-link>
+                          </div>
+                        </template>
+                      </el-alert>
                       <el-form-item :label="t('mouseControl')" class="form-item-align" label-position="left">
                         <el-switch v-model="visionControlSettings.mouse" @click.stop @change="autoSaveSettings"/>
                       </el-form-item>
@@ -11306,104 +11439,6 @@ function updateElement(el, rawMarkdown, formatFn) {
                     </el-dialog>
                   </el-tab-pane>
                 </el-tabs>
-              </div>
-
-            <!-- 新增表情包界面 -->
-              <div v-show="subMenu === 'sticker'" class="page">
-                <div class="provider-grid">
-                  <!-- 已有表情包库 -->
-                  <div 
-                    v-for="pack in stickerPacks" 
-                    :key="pack.id"
-                    class="provider-card knowledge-card">
-                    <div class="card-header">
-                      <el-switch v-model="pack.enabled"></el-switch>
-                      <div class="card-actions">
-                        <el-button @click="deleteStickerPack(pack)" type="danger" circle size="small">
-                          <i class="fa-solid fa-trash"></i>
-                        </el-button>
-                      </div>
-                    </div>
-                    <div class="kb-content">
-                      <div class="kb-header">
-                        <h3 class="kb-title">{{ pack.name }}</h3>
-                        <el-tag v-if="pack.stickers?.length" type="info" size="small" effect="dark">
-                          {{ pack.stickers.length }} {{ t('images') }}
-                        </el-tag>
-                      </div>
-                      <div class="kb-meta">
-                        <img :src="pack.cover" class="cover-image" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- 添加新表情包库 -->
-                  <div class="provider-card add-tile" @click="showStickerDialog = true">
-                    <el-icon :size="40" color="#909399">
-                      <i class="fa-solid fa-plus"></i>
-                    </el-icon>
-                    <div style="color: #606266; margin-top: 10px;">{{ t('addStickerPack') }}</div>
-                  </div>
-                </div>
-
-                <!-- 表情包创建对话框 -->
-                <el-dialog append-to-body
-                  v-model="showStickerDialog"
-                  :title="t('createStickerPack')"
-                  width="80%">
-                  <el-form label-position="top">
-                    <el-form-item :label="t('packName')" required>
-                      <el-input v-model="newStickerPack.name" />
-                    </el-form-item>
-
-                    <el-form-item :label="t('uploadStickers')" required>
-                      <div class="sticker-upload">
-                        <el-upload
-                          multiple
-                          list-type="picture-card"
-                          :file-list="uploadedStickers"
-                          :before-upload="handleBeforeUpload"
-                          :on-remove="handleStickerRemove"
-                          :on-preview="handlePictureCardPreview"
-                        >
-                          <el-icon><i class="fa-solid fa-plus"></i></el-icon>
-                        </el-upload>
-                      </div>
-                    </el-form-item>
-
-                    <!-- 预览弹窗 -->
-                    <el-dialog append-to-body v-model="dialogVisible" width="80%">
-                      <img :src="imageUrl" style="width: 100%" alt="Preview">
-                    </el-dialog>
-
-                    <el-form-item :label="t('imageDescription')" required>
-                      <div class="tag-editor">
-                        <div class="tag-item" 
-                            v-for="(sticker, index) in uploadedStickers" 
-                            :key="index">
-                          <img :src="sticker.url" class="sticker-thumb" />
-                          <el-input
-                            type="textarea"
-                            :rows="2"
-                            v-model="sticker.description"
-                            :placeholder="t('enterDescriptionPlaceholder')"
-                          />
-                        </div>
-                      </div>
-                    </el-form-item>
-                  </el-form>
-
-                  <template #footer>
-                    <el-button @click="cancelStickerUpload">{{ t('cancel') }}</el-button>
-                    <el-button 
-                      type="primary"
-                      @click="createStickerPack"
-                      :disabled="!newStickerPack.name || uploadedStickers.length === 0"
-                      >
-                      {{ t('createImmediately') }}
-                    </el-button>
-                  </template>
-                </el-dialog>
               </div>
 
               <!-- 在agent_group的内容区添加ComfyUI配置 -->
@@ -15270,6 +15305,98 @@ function updateElement(el, rawMarkdown, formatFn) {
                         </div>
                       </div>
                     </el-form>
+
+                    <!-- VRM桌宠API -->
+                    <el-form class="settings-form">
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <span>
+                            <el-icon><i class='fa-solid fa-server'></i></el-icon>
+                            {{ t('vrmAPI') }}
+                          </span>
+                        </div>
+                        <div class="tool-content">
+                          <el-alert
+                            type="info"
+                            :closable="false"
+                            class="mb-2"
+                          >
+                            {{ t('vrmAPIInstructions') }}
+                          </el-alert>
+                          <el-form-item :label="t('apiEndpoint')" class="form-item-align" label-position="top">
+                            <el-input
+                              :value="partyURL+'/vrm.html'"
+                              readonly
+                              class="full-width-input"
+                            >
+                              <template #append>
+                                <el-button
+                                  @click="copyVrmEndpoint"
+                                  class="copy-btn"
+                                >
+                                <i class="fa-solid fa-copy"></i>
+                                </el-button>
+                              </template>
+                            </el-input>
+                          </el-form-item>
+                          <el-form-item :label="t('360apiEndpoint')" class="form-item-align" label-position="top">
+                            <el-input
+                              :value="partyURL+'/vrm.html?mode=render'"
+                              readonly
+                              class="full-width-input"
+                            >
+                              <template #append>
+                                <el-button
+                                  @click="copyVrmEndpoint"
+                                  class="copy-btn"
+                                >
+                                <i class="fa-solid fa-copy"></i>
+                                </el-button>
+                              </template>
+                            </el-input>
+                          </el-form-item>
+                          <el-form-item :label="t('vmcpReceive')" class="form-item-align" label-position="top">
+                            <el-input
+                              value="http://127.0.0.1:39539"
+                              readonly
+                              class="full-width-input"
+                            >
+                              <template #append>
+                                <el-button
+                                  @click="copyURL('http://127.0.0.1:39539')"
+                                  class="copy-btn"
+                                >
+                                <i class="fa-solid fa-copy"></i>
+                                </el-button>
+                              </template>
+                            </el-input>
+                          </el-form-item>
+                          <el-form-item :label="t('vmcpSend')" class="form-item-align" label-position="top">
+                            <el-input
+                              value="http://127.0.0.1:39540"
+                              readonly
+                              class="full-width-input"
+                            >
+                              <template #append>
+                                <el-button
+                                  @click="copyURL('http://127.0.0.1:39540')"
+                                  class="copy-btn"
+                                >
+                                <i class="fa-solid fa-copy"></i>
+                                </el-button>
+                              </template>
+                            </el-input>
+                          </el-form-item>
+                            <el-alert
+                              type="info"
+                              :closable="false"
+                              class="mb-2"
+                            >
+                              {{ t('vmcpInstructions') }}
+                            </el-alert>
+                        </div>
+                      </div>
+                    </el-form>
                   </div>
 
                   <!-- VRM模型上传对话框 -->
@@ -15579,6 +15706,43 @@ function updateElement(el, rawMarkdown, formatFn) {
                             >
                               <i class="fa-solid fa-plus"></i> 上传THA模型
                             </el-button>
+                          </el-form-item>
+                        </div>
+                      </div>
+                    </el-form>
+
+                    <!-- THA桌宠API -->
+                    <el-form class="settings-form">
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <span>
+                            <el-icon><i class='fa-solid fa-server'></i></el-icon>
+                            {{ t('thaAPI') }}
+                          </span>
+                        </div>
+                        <div class="tool-content">
+                          <el-alert
+                            type="info"
+                            :closable="false"
+                            class="mb-2"
+                          >
+                            {{ t('thaAPIInstructions') }}
+                          </el-alert>
+                          <el-form-item :label="t('thaApiEndpoint')" class="form-item-align" label-position="top">
+                            <el-input
+                              :value="partyURL+'/tha.html'"
+                              readonly
+                              class="full-width-input"
+                            >
+                              <template #append>
+                                <el-button
+                                  @click="copyTHAEndpoint"
+                                  class="copy-btn"
+                                >
+                                <i class="fa-solid fa-copy"></i>
+                                </el-button>
+                              </template>
+                            </el-input>
                           </el-form-item>
                         </div>
                       </div>
@@ -17091,103 +17255,6 @@ function updateElement(el, rawMarkdown, formatFn) {
                           </template>
                         </el-input>
                       </el-form-item>
-                    </div>
-                  </div>
-                </el-form>
-              </div>
-              <!-- VRM桌宠API -->
-              <div v-show="subMenu === 'vrm'" class="page">
-                <el-form class="settings-form">
-                  <div class="tool-item">
-                    <!-- 原有SuperAPI内容 -->
-                    <div class="tool-header">
-                      <span>
-                        <el-icon><i class='fa-solid fa-server'></i></el-icon>
-                        {{ t('vrmAPI') }}
-                      </span>
-                    </div>
-                    <div class="tool-content">
-                      <el-alert
-                        type="info"
-                        :closable="false"
-                        class="mb-2"
-                      >
-                        {{ t('vrmAPIInstructions') }}
-                      </el-alert>
-                      <!-- API端点 -->
-                      <el-form-item :label="t('apiEndpoint')" class="form-item-align" label-position="top">
-                        <el-input
-                          :value="partyURL+'/vrm.html'"
-                          readonly
-                          class="full-width-input"
-                        >
-                          <template #append>
-                            <el-button
-                              @click="copyVrmEndpoint"
-                              class="copy-btn"
-                            >
-                            <i class="fa-solid fa-copy"></i>
-                            </el-button>
-                          </template>
-                        </el-input>
-                      </el-form-item>
-                      <!-- API端点 -->
-                      <el-form-item :label="t('360apiEndpoint')" class="form-item-align" label-position="top">
-                        <el-input
-                          :value="partyURL+'/vrm.html?mode=render'"
-                          readonly
-                          class="full-width-input"
-                        >
-                          <template #append>
-                            <el-button
-                              @click="copyVrmEndpoint"
-                              class="copy-btn"
-                            >
-                            <i class="fa-solid fa-copy"></i>
-                            </el-button>
-                          </template>
-                        </el-input>
-                      </el-form-item>
-                      <!-- API端点 -->
-                      <el-form-item :label="t('vmcpReceive')" class="form-item-align" label-position="top">
-                        <el-input
-                          value="http://127.0.0.1:39539"
-                          readonly
-                          class="full-width-input"
-                        >
-                          <template #append>
-                            <el-button
-                              @click="copyURL('http://127.0.0.1:39539')"
-                              class="copy-btn"
-                            >
-                            <i class="fa-solid fa-copy"></i>
-                            </el-button>
-                          </template>
-                        </el-input>
-                      </el-form-item>
-                      <el-form-item :label="t('vmcpSend')" class="form-item-align" label-position="top">
-                        <el-input
-                          value="http://127.0.0.1:39540"
-                          readonly
-                          class="full-width-input"
-                        >
-                          <template #append>
-                            <el-button
-                              @click="copyURL('http://127.0.0.1:39540')"
-                              class="copy-btn"
-                            >
-                            <i class="fa-solid fa-copy"></i>
-                            </el-button>
-                          </template>
-                        </el-input>
-                      </el-form-item>
-                        <el-alert
-                          type="info"
-                          :closable="false"
-                          class="mb-2"
-                        >
-                          {{ t('vmcpInstructions') }}
-                        </el-alert>
                     </div>
                   </div>
                 </el-form>
