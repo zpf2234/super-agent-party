@@ -15692,6 +15692,18 @@ function updateElement(el, rawMarkdown, formatFn) {
                             ></el-switch>
                           </el-form-item>
 
+                          <el-form-item :label="t('srMode') || '超分画质'" class="form-item-align">
+                            <el-select
+                              v-model="THAConfig.srMode"
+                              @change="autoSaveSettings"
+                              style="width: 100%">
+                              <el-option :label="t('srOff') || '关闭'" value="off"></el-option>
+                              <el-option label="CNNx2M (快速)" value="cnnx2m"></el-option>
+                              <el-option label="CNNx2VL (推荐)" value="cnnx2vl"></el-option>
+                              <el-option label="CNNx2UL (极致)" value="cnnx2ul"></el-option>
+                            </el-select>
+                          </el-form-item>
+
                           <!-- THA模型选择框 -->
                           <el-form-item :label="t('thaModel')">
                             <el-select

@@ -8303,6 +8303,8 @@ async def tha_websocket_endpoint(websocket: WebSocket):
     settings = await load_settings()
     tha_config = settings.get("THAConfig", {})
     selected_id = tha_config.get("selectedModelId", "Lyra")
+    sr_mode = tha_config.get("srMode", "cnnx2vl")
+    jpeg_quality = 90 if sr_mode != "off" else 50
 
     # 1. 查找模型路径（macOS: .mlpackage 优先，非macOS: 仅 .onnx）
     is_mac = (sys.platform == 'darwin')
@@ -8373,7 +8375,7 @@ async def tha_websocket_endpoint(websocket: WebSocket):
                     start_time = time.perf_counter()
                     
                     pose = gen.step()
-                    jpeg = await loop.run_in_executor(None, engine.render, pose)
+                    jpeg = await loop.run_in_executor(None, engine.render, pose, jpeg_quality)
                     
                     await websocket.send_bytes(jpeg)
                     

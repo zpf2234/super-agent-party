@@ -668,6 +668,8 @@ window.lang_enUS = {
         'closeWindow': 'Close the window',
         'enabledExpressions': 'Enable Expressions Control',
         'enabledMotions': 'Enable Motions Control',
+        'srMode': 'SR Quality',
+        'srOff': 'Off',
         'viewOriginalMessage': 'View Original Message',
         'view': 'View',
         "vrmModel": "VRM Model",

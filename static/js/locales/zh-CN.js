@@ -671,6 +671,8 @@ window.lang_zhCN = {
         'closeWindow': '关闭窗口',
         'enabledExpressions': '启用表情控制',
         'enabledMotions': '启用动作控制',
+        'srMode': '超分画质',
+        'srOff': '关闭',
         'viewOriginalMessage': '查看原始消息',
         'view': '查看',
         "vrmModel": "VRM模型",

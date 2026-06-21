@@ -963,6 +963,7 @@ let vue_data = {
       name: 'default',
       enabledEmotions: false,
       enabledMouthSync: false,
+      srMode: 'cnnx2vl',
       selectedModelId: 'Lyra',
       windowWidth: 540,
       windowHeight: 540,
