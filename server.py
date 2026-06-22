@@ -775,6 +775,16 @@ async def lifespan(app: FastAPI):
     scheduler = AgentScheduler(settings)
     scheduler_task = asyncio.create_task(scheduler.start_loop())
 
+    # --- [日记系统引擎初始化] ---
+    # 引擎循环常驻，未启用时空转；保存设置时通过 update_config 热更新。
+    try:
+        from py.diary_engine import global_diary_engine
+        global_diary_engine.update_config((settings or {}).get("diarySettings"))
+        diary_engine_task = asyncio.create_task(global_diary_engine.start())
+    except Exception as e:
+        print(f"日记引擎启动异常: {e}")
+        diary_engine_task = None
+
     # --- [日志系统初始化] ---
 
     timestamp = time.time()
@@ -960,6 +970,13 @@ async def lifespan(app: FastAPI):
 
     if scheduler_task:
         scheduler_task.cancel()
+    try:
+        if diary_engine_task:
+            from py.diary_engine import global_diary_engine
+            global_diary_engine.stop()
+            diary_engine_task.cancel()
+    except Exception as e:
+        print(f"日记引擎停止异常: {e}")
     from py.node_runner import node_mgr
     ext_ids = list(node_mgr.exts.keys())
     for ext_id in ext_ids:
@@ -11493,6 +11510,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             break
                 await save_settings(settings_dict)
                 await sync_all_bots_behavior(settings_dict)
+                try:
+                    from py.diary_engine import global_diary_engine
+                    global_diary_engine.update_config(settings_dict.get("diarySettings"))
+                except Exception as e:
+                    print(f"日记引擎配置同步异常: {e}")
 
                 await ws_manager.send_json({
                     "type": "settings_saved",
@@ -11797,6 +11819,9 @@ app.include_router(embedding_router)
 
 from py.affection_api import router as affection_router
 app.include_router(affection_router)
+
+from py.diary_api import router as diary_router
+app.include_router(diary_router)
 
 mcp = FastApiMCP(
     app,
