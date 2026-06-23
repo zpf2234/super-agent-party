@@ -3104,32 +3104,64 @@ formatMessage(content, index) {
         };
 
         try {
-            const fetchTimeoutMs = 300000;
-            const abortSignal = this.abortController.signal;
-            const timeoutSignal = AbortSignal.timeout(fetchTimeoutMs);
-            const combinedSignal = AbortSignal.any([abortSignal, timeoutSignal]);
+            const MAX_FETCH_RETRIES = 3;
+            const RETRY_BASE_DELAY = 1000;
+            let lastFetchError = null;
+            let response = null;
 
-            const response = await fetch(`/v1/chat/completions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: targetAgentId,
-                    messages: messagesPayload,
-                    stream: true,
-                    fileLinks: this.fileLinks,
-                    asyncToolsID: this.asyncToolsID || [],
-                    reasoning_effort: this.reasoning_effort,
-                    conversation_id: this.stringifyEntityId(this.conversationId),
-                    group_id: this.stringifyEntityId(this.activeConversationGroupId || this.draftConversationGroupId || 'default'),
-                    user_message_id: this.stringifyEntityId(latestUserMessage?.id || null),
-                }),
-                signal: combinedSignal
-            });
+            for (let retryAttempt = 0; retryAttempt <= MAX_FETCH_RETRIES; retryAttempt++) {
+                try {
+                    if (retryAttempt > 0) {
+                        if (this.abortController?.signal.aborted) throw new DOMException('User aborted', 'AbortError');
+                        const delay = RETRY_BASE_DELAY * Math.pow(2, retryAttempt - 1);
+                        console.log(`[Retry] fetch /v1/chat/completions 第 ${retryAttempt}/${MAX_FETCH_RETRIES} 次重试, 等待 ${delay}ms...`);
+                        await new Promise(r => setTimeout(r, delay));
+                    }
 
-            if (!response.ok) {
-                let errText = await response.text();
+                    const fetchTimeoutMs = 300000;
+                    const abortSignal = this.abortController.signal;
+                    const timeoutSignal = AbortSignal.timeout(fetchTimeoutMs);
+                    const combinedSignal = AbortSignal.any([abortSignal, timeoutSignal]);
+
+                    response = await fetch(`/v1/chat/completions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: targetAgentId,
+                            messages: messagesPayload,
+                            stream: true,
+                            fileLinks: this.fileLinks,
+                            asyncToolsID: this.asyncToolsID || [],
+                            reasoning_effort: this.reasoning_effort,
+                            conversation_id: this.stringifyEntityId(this.conversationId),
+                            group_id: this.stringifyEntityId(this.activeConversationGroupId || this.draftConversationGroupId || 'default'),
+                            user_message_id: this.stringifyEntityId(latestUserMessage?.id || null),
+                        }),
+                        signal: combinedSignal
+                    });
+
+                    if (response.ok) break;
+                    if (response.status >= 400 && response.status < 500) break;
+                    if (retryAttempt < MAX_FETCH_RETRIES) {
+                        lastFetchError = new Error(`Server error: ${response.status}`);
+                        console.log(`[Retry] HTTP ${response.status}, 将重试...`);
+                        continue;
+                    }
+                } catch (e) {
+                    lastFetchError = e;
+                    if (e.name === 'AbortError') throw e;
+                    if (retryAttempt < MAX_FETCH_RETRIES) {
+                        console.log(`[Retry] 网络错误: ${e.message}, 将重试...`);
+                        continue;
+                    }
+                    throw e;
+                }
+            }
+
+            if (!response || !response.ok) {
+                let errText = response ? await response.text() : '';
                 try { const errObj = JSON.parse(errText); errText = errObj.error?.message || errText; } catch (e) { }
-                throw new Error(errText);
+                throw new Error(errText || lastFetchError?.message || 'Request failed after retries');
             }
 
             const contentType = response.headers.get('content-type') || '';
