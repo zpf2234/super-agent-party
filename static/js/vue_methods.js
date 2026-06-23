@@ -2248,7 +2248,12 @@ formatMessage(content, index) {
         else if (data.type === 'diary_entry') {
             // 日记系统：将后端生成的日记内容原样展示到当前对话
             if (data.data && data.data.content) {
-                this.pushDiaryToChat(data.data.content, data.data.actionType);
+                if (data.data.actionType === 'system_notify') {
+                    const title = data.data.title || this.t('DiarySystem') || '日记系统';
+                    showNotification(title + ': ' + data.data.content, 'warning');
+                } else {
+                    this.pushDiaryToChat(data.data.content, data.data.actionType);
+                }
             }
         }
         else if (data.type === 'settings_saved') {
@@ -12154,23 +12159,12 @@ copySubtitleOverlayEndpoint(){
     if (this.chromeMCPSettings.enabled && this.chromeMCPSettings.type === 'internal' && this.isElectron) {
         if (!window.electronAPI) return;
         await this.autoSaveSettings();
-        // 获取主进程实际状态
+        // CDP 端口始终开启，直接同步端口号即可
         const cdpInfo = await window.electronAPI.getInternalCDPInfo();
-
-        if (!cdpInfo.active) {
-            // 严重情况：前端想开，但主进程没开端口（说明没重启）
-            // this.chromeMCPSettings.enabled = false; // 回滚开关
-            this.showCDPRestartDialog = true;
-            
-            return; // 终止后续流程
+        if (cdpInfo.active) {
+            this.chromeMCPSettings.CDPport = cdpInfo.port;
+            console.log(`[CDP] 准备启动 MCP，使用实际端口: ${cdpInfo.port}`);
         }
-
-        // 主进程已开启端口 -> 关键步骤：同步随机端口！
-        // 这样发给后端的 JSON 里 CDPport 才是主进程真正监听的端口 (例如 9527)
-        this.chromeMCPSettings.CDPport = cdpInfo.port;
-        console.log(`[CDP] 准备启动 MCP，使用实际端口: ${cdpInfo.port}`);
-        
-        // 保存最新的端口到配置文件 (可选，为了稳妥)
         await this.autoSaveSettings();
         showNotification(this.t('success_start_browserControl'));
     }
@@ -19530,6 +19524,78 @@ closeTaskCenter() {
           if (this.$message) this.$message.error("删除日记失败");
         }
       }).catch(() => {});
+    },
+
+    // 用户手动切换日记动作开关时，自动开启对应的底层工具
+    async onDiaryActionToggle(key) {
+      const enabled = this.diarySettings.actions[key].enabled;
+      // 先保存日记配置
+      await this.autoSaveSettings();
+
+      if (!enabled) return;
+
+      try {
+        switch (key) {
+          case 'webSearch':
+            this.webSearchSettings.enabled = true;
+            await this.autoSaveSettings();
+            showNotification(this.t('diaryAutoTool_webSearch') || '联网搜索工具已被自动开启', 'success');
+            break;
+
+          case 'knowledge':
+            if (!this.knowledgeBases || this.knowledgeBases.length === 0) {
+              showNotification(this.t('diaryAutoTool_noKb') || '没有已配置的知识库，请先在知识库设置中添加', 'warning');
+              break;
+            }
+            if (!this.knowledgeBases.some(kb => kb.enabled)) {
+              this.knowledgeBases[0].enabled = true;
+            }
+            await this.autoSaveSettings();
+            showNotification(this.t('diaryAutoTool_knowledge') || '知识库工具已被自动开启', 'success');
+            break;
+
+          case 'browserControl':
+            this.chromeMCPSettings.enabled = true;
+            this.chromeMCPSettings.type = 'internal';
+            if (this.isElectron && window.electronAPI) {
+              const cdpInfo = await window.electronAPI.getInternalCDPInfo();
+              if (cdpInfo.active) {
+                this.chromeMCPSettings.CDPport = cdpInfo.port;
+              }
+            }
+            await this.autoSaveSettings();
+            showNotification(this.t('diaryAutoTool_browser') || '浏览器控制工具（内建 CDP）已被自动开启', 'success');
+            break;
+
+          case 'smartHome':
+            if (!this.HASettings.api_key) {
+              showNotification(this.t('diaryAutoTool_noHaKey') || '未配置 Home Assistant API Key，请先在智能家居设置中填写', 'warning');
+              this.diarySettings.actions[key].enabled = false;
+              await this.autoSaveSettings();
+              break;
+            }
+            this.HASettings.enabled = true;
+            await this.autoSaveSettings();
+            const haResp = await fetch('/start_HA', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: this.HASettings })
+            });
+            if (haResp.ok) {
+              showNotification(this.t('diaryAutoTool_smartHome') || '智能家居工具已被自动开启', 'success');
+            } else {
+              this.HASettings.enabled = false;
+              this.diarySettings.actions[key].enabled = false;
+              await this.autoSaveSettings();
+              const errText = await haResp.text().catch(() => '');
+              showNotification(this.t('diaryAutoTool_smartHomeFail') || ('智能家居工具开启失败：' + (errText || '请检查 HA 配置')), 'error');
+            }
+            break;
+        }
+      } catch (e) {
+        console.error('[Diary] 自动开启工具失败:', e);
+        showNotification(this.t('diaryAutoTool_error') || ('开启对应工具失败: ' + (e.message || '未知错误')), 'error');
+      }
     },
 
     // 动作类型的图标/标签颜色（供模板使用）

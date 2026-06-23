@@ -143,22 +143,72 @@ async def delete_diary_entry(entry_id: str, book_id: str = DEFAULT_BOOK_ID):
 
 
 async def list_diary_books():
-    """列出所有日记本（含默认兜底本）的概要信息，按最近更新时间倒序"""
+    """列出所有日记本，自动：新建角色本 / 同名重联 / 清空无日记的孤儿本"""
     os.makedirs(DIARY_DIR, exist_ok=True)
     await _migrate_legacy_if_needed()
-    books = []
+
+    # 1. 加载当前角色卡列表
+    memories = []
+    memory_by_name = {}
     try:
-        names = await asyncio.to_thread(lambda: os.listdir(DIARY_DIR))
+        from py.get_setting import load_settings
+        settings = await load_settings()
+        memories = (settings or {}).get("memories", []) or []
+        for mem in memories:
+            mn = (mem.get("name") or "").strip()
+            if mn:
+                memory_by_name[mn.lower()] = mem
     except Exception:
-        names = []
-    for fname in names:
+        pass
+
+    memory_ids = {mem.get("id") for mem in memories if mem.get("id")}
+
+    # 2. 扫描已有本子文件
+    books = []
+    existing_files = set()
+    try:
+        fnames = await asyncio.to_thread(lambda: os.listdir(DIARY_DIR))
+    except Exception:
+        fnames = []
+    for fname in fnames:
         if not fname.endswith('.json'):
             continue
         if fname == os.path.basename(LEGACY_DIARY_FILE):
             continue
         book_id = fname[:-len('.json')]
+        existing_files.add(fname)
         data = await load_diary_data(book_id)
         entries = data.get("entries", [])
+        char_id = data.get("characterId")
+        char_name = data.get("characterName", "")
+
+        if char_id and char_id in memory_ids:
+            # 角色仍存在 → 同步名称
+            mem = next((m for m in memories if m.get("id") == char_id), None)
+            if mem and data.get("characterName") != (mem.get("name") or ""):
+                data["characterName"] = mem.get("name", "")
+                await save_diary_data(data, book_id)
+                char_name = data["characterName"]
+        elif char_id:
+            # 角色已删除
+            if char_name and char_name.lower() in memory_by_name:
+                # 同名角色重建 → 重联
+                mem = memory_by_name[char_name.lower()]
+                data["characterId"] = mem.get("id")
+                data["characterName"] = mem.get("name", "")
+                await save_diary_data(data, book_id)
+                char_id = data["characterId"]
+                char_name = data["characterName"]
+            elif len(entries) == 0:
+                # 无日记的孤儿本 → 删除文件并跳过
+                try:
+                    await asyncio.to_thread(lambda: os.remove(_book_file(book_id)))
+                except Exception:
+                    pass
+                print(f"📔 [日记系统] 已清理孤儿日记本: {char_name or book_id}")
+                continue
+            # 有日记的孤儿本 → 保留
+
         last_time = ""
         if entries:
             try:
@@ -167,13 +217,32 @@ async def list_diary_books():
                 last_time = entries[-1].get("time", "")
         books.append({
             "bookId": book_id,
-            "characterId": data.get("characterId"),
-            "characterName": data.get("characterName", ""),
+            "characterId": char_id,
+            "characterName": char_name,
             "count": len(entries),
             "lastTime": last_time,
             "isDefault": book_id == DEFAULT_BOOK_ID,
         })
-    # 确保默认本始终存在于列表
+
+    # 3. 为还没有本子的角色自动创建空本
+    for mem in memories:
+        mid = mem.get("id")
+        if not mid:
+            continue
+        fname = f'{_safe_book_id(mid)}.json'
+        if fname not in existing_files:
+            await save_diary_data(_empty_book(mid, mem.get("name", "")), mid)
+            books.append({
+                "bookId": mid,
+                "characterId": mid,
+                "characterName": mem.get("name", ""),
+                "count": 0,
+                "lastTime": "",
+                "isDefault": False,
+            })
+            existing_files.add(fname)
+
+    # 4. 确保默认兜底本
     if not any(b["bookId"] == DEFAULT_BOOK_ID for b in books):
         books.append({
             "bookId": DEFAULT_BOOK_ID,
@@ -183,5 +252,56 @@ async def list_diary_books():
             "lastTime": "",
             "isDefault": True,
         })
-    books.sort(key=lambda b: (b["isDefault"], b["lastTime"] or ""), reverse=True)
-    return books
+
+    # 5. 安全过滤：移除所有死标签（非默认 + 角色已删 + 无日记）
+    books = [b for b in books if (
+        b["isDefault"] or
+        b["characterId"] in memory_ids or
+        b["count"] > 0
+    )]
+
+    # 6. 排序：默认本 → 有日记的按最近更新倒序 → 空本按名字正序
+    default_b = [b for b in books if b["isDefault"]]
+    with_entries = sorted(
+        [b for b in books if b["lastTime"] and not b["isDefault"]],
+        key=lambda b: b["lastTime"], reverse=True,
+    )
+    empty_b = sorted(
+        [b for b in books if not b["lastTime"] and not b["isDefault"]],
+        key=lambda b: b.get("characterName", ""),
+    )
+    return default_b + with_entries + empty_b
+
+
+async def query_diary_entries(query: str = "", book_id: str = DEFAULT_BOOK_ID,
+                              start_time: str = "", end_time: str = "",
+                              max_results: int = 5, entry_type: str = ""):
+    """按时间范围和关键词搜索日记条目，返回匹配列表"""
+    data = await load_diary_data(book_id)
+    entries = data.get("entries", [])
+    results = []
+    query_lower = query.lower() if query else ""
+    for e in reversed(entries):
+        etime = e.get("time", "")
+        if start_time and etime < start_time:
+            continue
+        if end_time and etime > end_time:
+            continue
+        if entry_type and e.get("type", "") != entry_type:
+            continue
+        if query_lower:
+            title = (e.get("title", "") or "").lower()
+            content = (e.get("content", "") or "").lower()
+            if query_lower not in title and query_lower not in content:
+                continue
+        results.append(e)
+        if max_results > 0 and len(results) >= max_results:
+            break
+    return results
+
+
+async def get_recent_diary_entries(book_id: str = DEFAULT_BOOK_ID, n: int = 5):
+    """获取最近 N 条日记条目"""
+    data = await load_diary_data(book_id)
+    entries = data.get("entries", [])
+    return entries[-n:] if n > 0 else []

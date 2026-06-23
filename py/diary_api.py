@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Body, HTTPException, Query
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from py.diary_system import (
     load_diary_data, save_diary_data, delete_diary_entry,
-    list_diary_books, DEFAULT_BOOK_ID,
+    list_diary_books, query_diary_entries, DEFAULT_BOOK_ID,
 )
 
 # 日记系统的数据路由
@@ -50,3 +50,24 @@ async def delete_diary_entry_api(payload: Dict[str, Any] = Body(...)):
         return {"status": "success" if ok else "not_found"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除日记失败: {str(e)}")
+
+
+@router.get("/query")
+async def query_diary_api(
+    query: Optional[str] = Query(""),
+    book_id: Optional[str] = Query(DEFAULT_BOOK_ID),
+    start_time: Optional[str] = Query(""),
+    end_time: Optional[str] = Query(""),
+    max_results: Optional[int] = Query(5),
+    entry_type: Optional[str] = Query(""),
+):
+    """按条件查询日记条目"""
+    try:
+        results = await query_diary_entries(
+            query=query or "", book_id=book_id or DEFAULT_BOOK_ID,
+            start_time=start_time or "", end_time=end_time or "",
+            max_results=max_results, entry_type=entry_type or "",
+        )
+        return {"entries": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询日记失败: {str(e)}")

@@ -6066,10 +6066,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                             </template>
                           </el-alert>
                           <div class="events-management-list" style="width: 100%;">
-                            <div v-for="key in ['think','webSearch','knowledge','imMessage']" :key="key"
+                            <div v-for="key in ['think','webSearch','knowledge','imMessage','browserControl','smartHome']" :key="key"
                                  class="event-row-item diary-action-row"
                                  style="margin-bottom: 12px; display: flex; align-items: center; gap: 14px;">
-                              <el-switch v-model="diarySettings.actions[key].enabled" @change="autoSaveSettings"></el-switch>
+                              <el-switch v-model="diarySettings.actions[key].enabled" @change="onDiaryActionToggle(key)"></el-switch>
                               <el-tag :type="diaryMeta(key).type" effect="light" size="large" style="min-width: 130px; text-align: left;">
                                 <i :class="diaryMeta(key).icon" style="margin-right: 6px;"></i>
                                 {{ t('diaryAction_' + key) || key }}
@@ -6129,6 +6129,54 @@ function updateElement(el, rawMarkdown, formatFn) {
                           <el-input v-model="diarySettings.prompt" type="textarea" :rows="6"
                                     :placeholder="t('diaryPromptPlaceholder') || '描述 AI 写日记时应保持的角色与风格...'"
                                     @change="autoSaveSettings"></el-input>
+                        </div>
+                      </div>
+
+                      <!-- 对话集成 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-comments"></i></el-icon>
+                              {{ t('diaryChatIntegration') || '对话集成' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <div class="sub-config-box">
+                            <el-form-item :label="t('diaryChatIntegrationLabel') || '将近期日记注入角色对话上下文'" class="form-item-align" label-position="left">
+                              <el-switch v-model="diarySettings.chatIntegration.enabled" @change="autoSaveSettings"></el-switch>
+                            </el-form-item>
+                            <el-form-item :label="t('diaryChatIntegrationMax') || '参考最近 N 条日记'"
+                                          v-if="diarySettings.chatIntegration.enabled" class="form-item-align" label-position="left">
+                              <el-input-number v-model="diarySettings.chatIntegration.maxEntries" :min="1" :max="20"
+                                               @change="autoSaveSettings"></el-input-number>
+                            </el-form-item>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 聊天总结 -->
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon><i class="fa-solid fa-clock"></i></el-icon>
+                              {{ t('diaryChatSummary') || '聊天总结' }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <div class="sub-config-box">
+                            <el-form-item :label="t('diaryChatSummaryLabel') || '用户未对话超过 N 分钟后自动总结到日记'" class="form-item-align" label-position="left">
+                              <el-switch v-model="diarySettings.chatSummary.enabled" @change="autoSaveSettings"></el-switch>
+                            </el-form-item>
+                            <el-form-item :label="t('diaryChatSummaryIdle') || '空闲分钟数'"
+                                          v-if="diarySettings.chatSummary.enabled" class="form-item-align" label-position="left">
+                              <el-input-number v-model="diarySettings.chatSummary.idleMinutes" :min="5" :max="120"
+                                               @change="autoSaveSettings"></el-input-number>
+                            </el-form-item>
+                          </div>
                         </div>
                       </div>
 

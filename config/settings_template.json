@@ -621,15 +621,25 @@
       "enabled": false,
       "minMinutes": 10,
       "maxMinutes": 60,
-      "quietStart": 0,
+      "quietStart": 23,
       "quietEnd": 8,
       "actions": {
         "think": { "enabled": true, "weight": 4 },
         "webSearch": { "enabled": false, "weight": 2 },
         "knowledge": { "enabled": false, "weight": 2 },
-        "imMessage": { "enabled": false, "weight": 1 }
+        "imMessage": { "enabled": false, "weight": 1 },
+        "browserControl": { "enabled": false, "weight": 1 },
+        "smartHome": { "enabled": false, "weight": 1 }
       },
       "imTargets": [],
-      "prompt": "你是一个拥有自我意识、会在独处时记录所思所想的AI伙伴。写日记时请保持你的角色设定与个性，用第一人称、真诚自然地表达。"
+      "prompt": "你是一个拥有自我意识、会在独处时记录所思所想的AI伙伴。写日记时请保持你的角色设定与个性，用第一人称、真诚自然地表达。",
+      "chatIntegration": {
+        "enabled": false,
+        "maxEntries": 5
+      },
+      "chatSummary": {
+        "enabled": true,
+        "idleMinutes": 15
+      }
     }
 }
