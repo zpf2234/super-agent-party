@@ -15737,7 +15737,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           >
                             {{ t('vrmAPIInstructions') }}
                           </el-alert>
-                          <el-form-item :label="t('apiEndpoint')" class="form-item-align" label-position="top">
+                          <el-form-item :label="t('vrmApiEndpoint')" class="form-item-align" label-position="top">
                             <el-input
                               :value="partyURL+'/vrm.html'"
                               readonly
@@ -15753,7 +15753,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </template>
                             </el-input>
                           </el-form-item>
-                          <el-form-item :label="t('360apiEndpoint')" class="form-item-align" label-position="top">
+                          <el-form-item :label="t('vrm360ApiEndpoint')" class="form-item-align" label-position="top">
                             <el-input
                               :value="partyURL+'/vrm.html?mode=render'"
                               readonly
@@ -15762,6 +15762,22 @@ function updateElement(el, rawMarkdown, formatFn) {
                               <template #append>
                                 <el-button
                                   @click="copyVrmEndpoint"
+                                  class="copy-btn"
+                                >
+                                <i class="fa-solid fa-copy"></i>
+                                </el-button>
+                              </template>
+                            </el-input>
+                          </el-form-item>
+                          <el-form-item :label="t('thaApiEndpoint')" class="form-item-align" label-position="top">
+                            <el-input
+                              :value="partyURL+'/tha.html'"
+                              readonly
+                              class="full-width-input"
+                            >
+                              <template #append>
+                                <el-button
+                                  @click="copyTHAEndpoint"
                                   class="copy-btn"
                                 >
                                 <i class="fa-solid fa-copy"></i>
@@ -16173,6 +16189,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                         </div>
                       </div>
                     </el-form>
+
                   </div>
                   <!-- THA模型上传对话框 -->
                   <el-dialog append-to-body
@@ -16666,7 +16683,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </el-alert>
 
                               <!-- API端点 -->
-                              <el-form-item :label="t('apiEndpoint')" class="form-item-align" label-position="top">
+                              <el-form-item :label="t('vrmApiEndpoint')" class="form-item-align" label-position="top">
                                 <el-input
                                   :value="partyURL+'/vrm.html'"
                                   readonly
@@ -16683,7 +16700,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                 </el-input>
                               </el-form-item>
                               <!-- API端点 -->
-                              <el-form-item :label="t('360apiEndpoint')" class="form-item-align" label-position="top">
+                              <el-form-item :label="t('vrm360ApiEndpoint')" class="form-item-align" label-position="top">
                                 <el-input
                                   :value="partyURL+'/vrm.html?mode=render'"
                                   readonly
@@ -16692,6 +16709,22 @@ function updateElement(el, rawMarkdown, formatFn) {
                                   <template #append>
                                     <el-button
                                       @click="copyVrmEndpoint"
+                                      class="copy-btn"
+                                    >
+                                    <i class="fa-solid fa-copy"></i>
+                                    </el-button>
+                                  </template>
+                                </el-input>
+                              </el-form-item>
+                              <el-form-item :label="t('thaApiEndpoint')" class="form-item-align" label-position="top">
+                                <el-input
+                                  :value="partyURL+'/tha.html'"
+                                  readonly
+                                  class="full-width-input"
+                                >
+                                  <template #append>
+                                    <el-button
+                                      @click="copyTHAEndpoint"
                                       class="copy-btn"
                                     >
                                     <i class="fa-solid fa-copy"></i>

@@ -80,6 +80,8 @@ window.lang_zhCN = {
         'modelName': '模型名称',
         'apiEndpoint': 'API 端点',
         '360apiEndpoint': '360全景 API 端点',
+        'vrmApiEndpoint': 'VRM API 端点',
+        'vrm360ApiEndpoint': 'VRM 360全景 API 端点',
         'exampleLanguage': '示例语言',
         'copy': '复制',
         'basicConfiguration': '基础配置',

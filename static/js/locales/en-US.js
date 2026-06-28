@@ -80,6 +80,8 @@ window.lang_enUS = {
         'modelName': 'Model Name',
         'apiEndpoint': 'API Endpoint',
         '360apiEndpoint': '360-degree panoramic API Endpoint',
+        'vrmApiEndpoint': 'VRM API Endpoint',
+        'vrm360ApiEndpoint': 'VRM 360-degree panoramic API Endpoint',
         'exampleLanguage': 'Example Language',
         'copy': 'Copy',
         'basicConfiguration': 'Basic Configuration',
