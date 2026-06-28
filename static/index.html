@@ -6973,6 +6973,26 @@ function updateElement(el, rawMarkdown, formatFn) {
                           <i class="fa-solid fa-plus"></i>
                         </el-button>
                       </div>
+                      <div v-if="mainSuggestedParams.length > 0" class="suggested-params">
+                        <div class="suggested-header">
+                          <i class="fa-solid fa-lightbulb"></i>
+                          <span>{{ t('suggestedParams') }}</span>
+                          <el-tag size="small" effect="plain" round>{{ formatVendorName(mainVendorName) }}</el-tag>
+                        </div>
+                        <div class="suggested-list">
+                          <el-tooltip
+                            v-for="param in mainSuggestedParams"
+                            :key="param.name"
+                            :content="t(param.desc)"
+                            placement="top"
+                          >
+                            <div class="suggested-card" @click="addMainSuggestedParam(param)">
+                              <span class="suggested-name"><i class="fa-solid fa-plus"></i> {{ param.name }}</span>
+                              <span class="suggested-type">{{ param.type }}</span>
+                            </div>
+                          </el-tooltip>
+                        </div>
+                      </div>
                       <div class="extra-params">
                         <div
                           v-for="(param, index) in settings.extra_params"
@@ -7282,6 +7302,26 @@ function updateElement(el, rawMarkdown, formatFn) {
                         >
                           <i class="fa-solid fa-plus"></i>
                         </el-button>
+                      </div>
+                      <div v-if="fastSuggestedParams.length > 0" class="suggested-params">
+                        <div class="suggested-header">
+                          <i class="fa-solid fa-lightbulb"></i>
+                          <span>{{ t('suggestedParams') }}</span>
+                          <el-tag size="small" effect="plain" round>{{ formatVendorName(fastVendorName) }}</el-tag>
+                        </div>
+                        <div class="suggested-list">
+                          <el-tooltip
+                            v-for="param in fastSuggestedParams"
+                            :key="param.name"
+                            :content="t(param.desc)"
+                            placement="top"
+                          >
+                            <div class="suggested-card" @click="addFastSuggestedParam(param)">
+                              <span class="suggested-name"><i class="fa-solid fa-plus"></i> {{ param.name }}</span>
+                              <span class="suggested-type">{{ param.type }}</span>
+                            </div>
+                          </el-tooltip>
+                        </div>
                       </div>
                       <div class="extra-params">
                         <div
@@ -18612,6 +18652,7 @@ function updateElement(el, rawMarkdown, formatFn) {
   <script src="libs/vue.global.prod.js"></script>
   <script src="libs/element-plus.js"></script>
   <script src="libs/element-plus-icons.js"></script>
+  <script src="js/vendor_params.js"></script>
   <script src="js/vue_data.js"></script>
   <script src="js/vue_methods.js"></script>
   <script src="js/renderer.js"></script>
