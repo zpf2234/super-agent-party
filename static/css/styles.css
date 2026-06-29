@@ -871,7 +871,6 @@ body {
 
 .el-menu-item:hover {
   background: var(--el-menu-hover-bg-color) !important;
-  transform: translateX(4px);
 }
 
 /* 输入系统全局适配 */
@@ -5078,8 +5077,6 @@ body {
   color: var(--el-color-primary) !important;
   font-weight: 500;
   border-radius: 8px !important;
-  margin: 4px 12px !important;
-  width: auto !important;
 }
 
 /* 聊天容器背景微纹理 (可选，增加质感) */
