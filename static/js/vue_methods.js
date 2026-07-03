@@ -3719,7 +3719,6 @@ formatMessage(content, index) {
                     const entry = currentMsg.backend_content[i];
                     if (entry && !Object.isFrozen(entry) && entry.role !== 'approval') {
                         Object.freeze(entry);
-                        if (Array.isArray(entry.tool_calls)) Object.freeze(entry.tool_calls);
                         if (typeof entry.content === 'string') Object.freeze(entry.content);
                     }
                 }
@@ -3732,7 +3731,6 @@ formatMessage(content, index) {
                     msg.backend_content.forEach(entry => {
                         if (entry && !Object.isFrozen(entry) && entry.role !== 'approval') {
                             Object.freeze(entry);
-                            if (Array.isArray(entry.tool_calls)) Object.freeze(entry.tool_calls);
                             if (typeof entry.content === 'string') Object.freeze(entry.content);
                         }
                     });
