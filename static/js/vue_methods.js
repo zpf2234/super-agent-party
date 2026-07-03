@@ -10522,7 +10522,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
         try {
             await Promise.race([
                 audioReady,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('sb_timeout')), 5000))
+                new Promise((_, reject) => setTimeout(() => reject(new Error('sb_timeout')), 30000))
             ]);
         } catch (e) {
             console.warn('MediaSource setup failed, falling back to blob:', e);
@@ -10546,7 +10546,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                     sourceBuffer.appendBuffer(first.value);
                     await new Promise((resolve) => {
                         sourceBuffer.addEventListener('updateend', () => resolve(), { once: true });
-                        setTimeout(() => resolve(), 5000);
+                        setTimeout(() => resolve(), 30000);
                     });
                 }
             }
