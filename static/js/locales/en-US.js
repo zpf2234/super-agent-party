@@ -1958,4 +1958,7 @@ Key3`,
         'thaButton': 'THA Table Pet',
         'tha_distill_model': 'Distill your own THA4 model',
         'tha_distill_desc': 'Use this repo to distill your own character THA4 ONNX model',
+        'enableNotifications': 'Generation complete notification',
+        'enableNotificationsDesc': 'When enabled, a system notification will be sent when AI finishes generating each round, while the window is in the background. Desktop client only.',
+        'aiGenerationComplete': 'AI generation complete'
     }

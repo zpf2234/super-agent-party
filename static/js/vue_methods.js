@@ -3641,6 +3641,10 @@ formatMessage(content, index) {
 
             currentMsg.generationFinished = true;
 
+            if (this.isElectron && this.systemSettings.enableNotifications && !document.hasFocus()) {
+              window.electronAPI.showNotification('Super Agent Party', this.t('aiGenerationComplete'));
+            }
+
             if (this.ttsSettings.enabled) {
                 if (this.audioStartTime > this.audioCtx.currentTime) {
                     const remainingTime = (this.audioStartTime - this.audioCtx.currentTime) * 1000;

@@ -12760,6 +12760,17 @@ function updateElement(el, rawMarkdown, formatFn) {
                     <span class="tool-desc">{{ t('safetyDisclaimerToggleNotice') }}</span>
                   </div>
 
+                  <div class="tool-item" v-if="isElectron">
+                    <div class="tool-header">
+                      <span>
+                        <el-icon><i class="fa-solid fa-bell"></i></el-icon>
+                        {{ t('enableNotifications') }}
+                      </span>
+                      <el-switch v-model="systemSettings.enableNotifications" @change="autoSaveSettings"></el-switch>
+                    </div>
+                    <span class="tool-desc">{{ t('enableNotificationsDesc') }}</span>
+                  </div>
+
                   <div class="tool-item" v-if="isGoalModeActive()">
                     <div class="tool-header">
                       <span>

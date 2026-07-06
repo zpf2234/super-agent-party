@@ -511,6 +511,7 @@ let vue_data = {
       showDisclaimer: true,
       goal_iterations: 30,
       enableShortcuts: true,
+      enableNotifications: false,
     },
     saveBgDialogVisible: false,
     newBgName: '',

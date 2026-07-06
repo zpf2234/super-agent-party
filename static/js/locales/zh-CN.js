@@ -1961,4 +1961,7 @@ key3`,
         'thaButton': 'THA 桌宠',
         'tha_distill_model': '蒸馏个人THA4模型',
         'tha_distill_desc': '使用此仓库蒸馏你自己的角色 THA4 ONNX 模型',
+        'enableNotifications': '生成完毕通知',
+        'enableNotificationsDesc': '启用后，当窗口处于后台时，AI 每轮生成完毕后将通过系统通知提醒你。仅在桌面客户端中可用。',
+        'aiGenerationComplete': 'AI 生成完毕'
     }
