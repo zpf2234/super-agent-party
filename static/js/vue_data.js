@@ -428,6 +428,10 @@ let vue_data = {
       enabled: false,
       permissionMode: 'default',
     },
+    wslSettings: {
+      enabled: false,
+      permissionMode: 'default',
+    },
     ocSettings: {
       enabled: false,
       selectedProvider: null,
