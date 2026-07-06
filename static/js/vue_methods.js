@@ -1222,6 +1222,7 @@ formatFileUrl(originalUrl) {
       else if (key === 'system') {
         this.activeMenu = 'system';
         this.subMenu = 'general'; // 默认显示通用设置子页
+        this.loadAccountList(); // 加载账户列表
       }
       else {
         this.activeMenu = key;
@@ -20397,6 +20398,154 @@ gotoAddExtension(){
         this.systemSettings.disclaimerAccepted = true;
         this.systemSettings.showDisclaimer = false;
         this.autoSaveSettings();
+      }
+    },
+
+    // ============================================================
+    // 账户管理方法
+    // ============================================================
+    async loadAccountList() {
+      if (!isElectron) return;
+      try {
+        const result = await window.electronAPI.accountsGetAll();
+        if (result) {
+          this.accountList = result.accounts;
+          this.isRootAccount = result.accounts.some(a => a.id === result.currentAccountId && a.type === 'root');
+          this.currentAccountInfo = result.accounts.find(a => a.id === result.currentAccountId) || null;
+        }
+      } catch (e) {
+        console.error('加载账户列表失败:', e);
+      }
+    },
+
+    async selectAccountDataPath() {
+      if (!isElectron) return;
+      try {
+        const result = await window.electronAPI.openDirectoryDialog();
+        if (result && result.filePaths && result.filePaths.length > 0) {
+          this.newAccountDataPath = result.filePaths[0];
+        }
+      } catch (e) {
+        console.error('选择目录失败:', e);
+      }
+    },
+
+    async confirmAddAccount() {
+      if (!this.newAccountDataPath) {
+        showNotification(this.t('pleaseSelectDataPath') || '请选择数据存储路径', 'warning');
+        return;
+      }
+
+      try {
+        const result = await window.electronAPI.accountsCreate(
+          this.newAccountName || null,
+          this.newAccountDataPath,
+          this.newAccountCloneFromRoot,
+          this.newAccountSetAsDefault
+        );
+
+        if (result.success) {
+          showNotification(this.t('accountCreated') || '新账户创建成功', 'success');
+          this.showAddAccountDialog = false;
+          this.newAccountName = '';
+          this.newAccountDataPath = '';
+          this.newAccountCloneFromRoot = true;
+          this.newAccountSetAsDefault = false;
+          await this.loadAccountList();
+        } else {
+          showNotification(result.error || (this.t('accountCreateFailed') || '账户创建失败'), 'error');
+        }
+      } catch (e) {
+        console.error('创建账户失败:', e);
+        showNotification(this.t('accountCreateFailed') || '账户创建失败', 'error');
+      }
+    },
+
+    confirmDeleteAccount(acc) {
+      this.deleteAccountId = acc.id;
+      this.deleteAccountRemoveFolder = true;
+      this.showDeleteAccountDialog = true;
+    },
+
+    async confirmDeleteAccountAction() {
+      if (!this.deleteAccountId) return;
+      try {
+        const result = await window.electronAPI.accountsDelete(this.deleteAccountId, this.deleteAccountRemoveFolder);
+        if (result.success) {
+          showNotification(this.t('accountDeleted') || '账户已删除', 'success');
+          this.showDeleteAccountDialog = false;
+          this.deleteAccountId = null;
+          await this.loadAccountList();
+        } else {
+          showNotification(result.error || (this.t('accountDeleteFailed') || '账户删除失败'), 'error');
+        }
+      } catch (e) {
+        console.error('删除账户失败:', e);
+        showNotification(this.t('accountDeleteFailed') || '账户删除失败', 'error');
+      }
+    },
+
+    renameAccountDialog(acc) {
+      this.renameAccountId = acc.id;
+      this.renameAccountName = acc.name;
+      this.showRenameAccountDialog = true;
+    },
+
+    async confirmRenameAccount() {
+      if (!this.renameAccountId || !this.renameAccountName) return;
+      try {
+        const result = await window.electronAPI.accountsRename(this.renameAccountId, this.renameAccountName);
+        if (result.success) {
+          showNotification(this.t('accountRenamed') || '账户已重命名', 'success');
+          this.showRenameAccountDialog = false;
+          this.renameAccountId = null;
+          this.renameAccountName = '';
+          await this.loadAccountList();
+        } else {
+          showNotification(result.error || (this.t('accountRenameFailed') || '重命名失败'), 'error');
+        }
+      } catch (e) {
+        console.error('重命名失败:', e);
+      }
+    },
+
+    async setDefaultAccount(accountId) {
+      try {
+        const result = await window.electronAPI.accountsSetDefault(accountId);
+        if (result.success) {
+          showNotification(this.t('defaultAccountSet') || '默认账户已设置', 'success');
+          await this.loadAccountList();
+        } else {
+          showNotification(result.error || (this.t('defaultAccountSetFailed') || '设置失败'), 'error');
+        }
+      } catch (e) {
+        console.error('设置默认账户失败:', e);
+      }
+    },
+
+    async launchAccount(accountId) {
+      try {
+        const result = await window.electronAPI.accountsLaunch(accountId);
+        if (result.success) {
+          showNotification(this.t('accountLaunching') || '正在启动新实例...', 'success');
+        } else {
+          showNotification(result.error || (this.t('accountLaunchFailed') || '启动失败'), 'error');
+        }
+      } catch (e) {
+        console.error('启动账户失败:', e);
+      }
+    },
+
+    async switchToAccount(accountId) {
+      try {
+        await this.autoSaveSettings();
+        await new Promise(r => setTimeout(r, 200));
+        const result = await window.electronAPI.accountsSwitch(accountId);
+        if (!result.success) {
+          showNotification(result.error || (this.t('accountSwitchFailed') || '切换失败'), 'error');
+        }
+      } catch (e) {
+        console.error('切换账户失败:', e);
       }
     },
   

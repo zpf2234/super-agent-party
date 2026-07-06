@@ -86,10 +86,16 @@ os.environ["MEM0_TELEMETRY"] = "False"
 parser = argparse.ArgumentParser(description="Run the ASGI application server.")
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=3456)
+parser.add_argument("--data-dir", default=None, help="Custom data directory for multi-account support")
 args, _ = parser.parse_known_args()
 
 HOST = args.host
 PREFERED_PORT = args.port
+CUSTOM_DATA_DIR = args.data_dir
+
+# 设置环境变量，供 py/get_setting.py 等模块使用
+if CUSTOM_DATA_DIR:
+    os.environ['SUPER_AGENT_PARTY_DATA_DIR'] = CUSTOM_DATA_DIR
 
 def is_addr_in_use_error(e):
     """跨平台判断是否为地址被占用错误"""

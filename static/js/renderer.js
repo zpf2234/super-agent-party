@@ -804,6 +804,7 @@ const app = Vue.createApp({
     
     if (isElectron) {
       this.checkServerPort();
+      this.loadAccountList();
     }
     
     window.addEventListener('keydown', this.handleKeyDown)

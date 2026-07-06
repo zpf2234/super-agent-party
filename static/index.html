@@ -946,6 +946,14 @@ function updateElement(el, rawMarkdown, formatFn) {
               </div>
             </div>
 
+            <!-- 11. 添加新账户 (仅 root 账户可见，仅 Electron 模式) -->
+            <div v-if="isElectron && isRootAccount" class="guide-card" @click="showAddAccountDialog = true">
+              <div class="card-icon gold"><i class="fa-solid fa-user-plus"></i></div>
+              <div class="card-info">
+                <h3>{{ t('addNewAccount') || '添加新账户' }}</h3>
+              </div>
+            </div>
+
             <!-- 收藏的扩展卡片动态渲染 -->
             <div v-for="ext in favoriteExtensions" :key="ext.id" class="guide-card extension" @click="openExtensionInWindow(ext)">
               <div class="card-icon purple"><i class="fa-solid fa-puzzle-piece"></i></div>
@@ -981,6 +989,37 @@ function updateElement(el, rawMarkdown, formatFn) {
               <el-button @click="showOmniAgentDialog = false">{{ t('cancel') }}</el-button>
               <el-button type="primary" :disabled="!CLISettings.cc_path" @click="confirmOmniAgent">
                 {{ t('confirmAndStart') }}
+              </el-button>
+            </template>
+          </el-dialog>
+
+          <!-- 添加新账户弹窗 -->
+          <el-dialog append-to-body v-model="showAddAccountDialog" :title="t('addNewAccount') || '添加新账户'" width="520px">
+            <el-form label-position="top">
+              <el-form-item :label="t('accountName') || '账户名称'" required>
+                <el-input v-model="newAccountName" :placeholder="t('accountNamePlaceholder') || '输入账户名称'"></el-input>
+              </el-form-item>
+              <el-form-item :label="t('dataStoragePath') || '数据存储路径'" required>
+                <el-input v-model="newAccountDataPath" readonly>
+                  <template #append>
+                    <el-button @click="selectAccountDataPath">
+                      <i class="fa-solid fa-folder-open"></i>
+                    </el-button>
+                  </template>
+                </el-input>
+                <div style="font-size:12px;color:#999;margin-top:4px;">{{ t('dataStoragePathHint') || '选择一个文件夹，数据将存储在其中的 Super-Agent-Party 子目录下' }}</div>
+              </el-form-item>
+              <el-form-item>
+                <el-checkbox v-model="newAccountCloneFromRoot">{{ t('cloneFromRoot') || '以当前账户配置作为模板生成（完整克隆）' }}</el-checkbox>
+              </el-form-item>
+              <el-form-item>
+                <el-checkbox v-model="newAccountSetAsDefault">{{ t('setAsDefaultAccount') || '将此账户设为默认启动账户' }}</el-checkbox>
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="showAddAccountDialog = false">{{ t('cancel') }}</el-button>
+              <el-button type="primary" :disabled="!newAccountDataPath" @click="confirmAddAccount">
+                {{ t('confirmCreate') || '确认创建' }}
               </el-button>
             </template>
           </el-dialog>
@@ -13271,6 +13310,97 @@ function updateElement(el, rawMarkdown, formatFn) {
                   </div>
                 </el-form>
               </div>
+
+              <!-- ===== 账户管理子页 ===== -->
+              <div v-show="subMenu === 'accounts'" class="page tools-container">
+                <div class="tool-item" style="margin-bottom: 16px;">
+                  <div class="tool-header">
+                    <span>
+                      <el-icon><i class="fa-solid fa-users"></i></el-icon>
+                      {{ t('accountManagement') || '账户管理' }}
+                    </span>
+                    <el-button v-if="isElectron && isRootAccount" type="primary" size="small" @click="showAddAccountDialog = true">
+                      <i class="fa-solid fa-user-plus"></i> {{ t('addNewAccount') || '添加新账户' }}
+                    </el-button>
+                  </div>
+                </div>
+
+                <el-empty v-if="!isElectron" :description="t('accountElectronOnly') || '账户管理仅在 Electron 桌面版中可用'"></el-empty>
+
+                <div v-else-if="accountList.length === 0" style="text-align:center;padding:40px;color:#999;">
+                  <i class="fa-solid fa-user-group" style="font-size:48px;margin-bottom:12px;"></i>
+                  <p>{{ t('noAccountsYet') || '还没有创建任何账户' }}</p>
+                </div>
+
+                <div v-else class="account-cards">
+                  <div v-for="acc in accountList" :key="acc.id" class="account-card"
+                    :class="{ 'is-default': acc.isDefault, 'is-current': acc.id === currentAccountInfo?.id }">
+                    <div class="account-card-left">
+                      <div class="account-card-icon" :class="acc.type">
+                        <i v-if="acc.type === 'root'" class="fa-solid fa-crown"></i>
+                        <i v-else class="fa-solid fa-user"></i>
+                      </div>
+                      <div class="account-card-info">
+                        <div class="account-card-name">
+                          {{ acc.name }}
+                          <span class="account-type-tag" :class="acc.type">{{ acc.type === 'root' ? 'Root' : 'User' }}</span>
+                          <span v-if="acc.id === currentAccountInfo?.id" class="account-current-tag">{{ t('currentAccount') || '当前' }}</span>
+                          <span v-if="acc.isDefault" class="account-default-tag">{{ t('defaultAccount') || '默认' }}</span>
+                        </div>
+                        <div class="account-card-path">{{ acc.dataPath }}</div>
+                        <div class="account-card-meta">
+                          {{ t('createdAt') || '创建于' }}: {{ new Date(acc.createdAt).toLocaleString() }}
+                          <span v-if="acc.lastLaunched"> | {{ t('lastLaunched') || '最后启动' }}: {{ new Date(acc.lastLaunched).toLocaleString() }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="account-card-actions">
+                      <el-button size="small" @click="renameAccountDialog(acc)" :title="t('rename') || '重命名'">
+                        <i class="fa-solid fa-pen"></i>
+                      </el-button>
+                      <el-button size="small" :type="acc.isDefault ? 'success' : ''" @click="setDefaultAccount(acc.id)" :title="t('setAsDefaultAccount') || '设为默认'">
+                        <i class="fa-solid fa-star"></i>
+                      </el-button>
+                      <el-button size="small" type="primary" @click="launchAccount(acc.id)" :title="t('launchAccount') || '启动新实例'">
+                        <i class="fa-solid fa-play"></i>
+                      </el-button>
+                      <el-button v-if="acc.id !== currentAccountInfo?.id" size="small" @click="switchToAccount(acc.id)" :title="t('switchAccount') || '切换账户'">
+                        <i class="fa-solid fa-arrow-right-arrow-left"></i>
+                      </el-button>
+                      <el-button
+                        v-if="acc.type !== 'root'"
+                        size="small"
+                        type="danger"
+                        @click="confirmDeleteAccount(acc)"
+                        :title="t('deleteAccount') || '删除账户'">
+                        <i class="fa-solid fa-trash-can"></i>
+                      </el-button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 删除账户确认弹窗 -->
+              <el-dialog append-to-body v-model="showDeleteAccountDialog" :title="t('deleteAccount') || '删除账户'" width="400px">
+                <p>{{ t('deleteAccountConfirm') || '确定要删除此账户吗？此操作不可撤销。' }}</p>
+                <el-radio-group v-model="deleteAccountRemoveFolder" style="margin-top:12px;">
+                  <el-radio :value="false">{{ t('keepDataFolder') || '保留数据文件夹' }}</el-radio>
+                  <el-radio :value="true">{{ t('deleteDataFolder') || '彻底删除数据文件夹' }}</el-radio>
+                </el-radio-group>
+                <template #footer>
+                  <el-button @click="showDeleteAccountDialog = false">{{ t('cancel') }}</el-button>
+                  <el-button type="danger" @click="confirmDeleteAccountAction">{{ t('confirmDelete') || '确认删除' }}</el-button>
+                </template>
+              </el-dialog>
+
+              <!-- 重命名账户弹窗 -->
+              <el-dialog append-to-body v-model="showRenameAccountDialog" :title="t('renameAccount') || '重命名账户'" width="400px">
+                <el-input v-model="renameAccountName" :placeholder="t('accountNamePlaceholder') || '输入账户名称'"></el-input>
+                <template #footer>
+                  <el-button @click="showRenameAccountDialog = false">{{ t('cancel') }}</el-button>
+                  <el-button type="primary" @click="confirmRenameAccount">{{ t('confirmRename') || '确认重命名' }}</el-button>
+                </template>
+              </el-dialog>
 
             </div>
           </div>
