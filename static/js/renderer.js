@@ -816,6 +816,10 @@ const app = Vue.createApp({
       this.isMac = window.electron.isMac;
       this.isWindows = window.electron.isWindows;
     }
+
+    if (!this.isWindows && this.CLISettings.engine === 'wsl') {
+      this.CLISettings.engine = 'local';
+    }
     
     this.initWebSocket();
     this.highlightCode();
