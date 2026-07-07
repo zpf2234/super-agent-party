@@ -2796,15 +2796,16 @@ app.on('web-contents-created', (event, contents) => {
       contents.stopNavigation();
     }
   });
-  contents.on('before-input-event', (_ev, input) => {
-    const { alt, key } = input;
-    if (alt && (key === 'Left' || key === 'Right')) {
-      input.preventDefault = true;
-    }
-});
+    contents.on('before-input-event', (_ev, input) => {
+        const { alt, key } = input;
+        if (alt && (key === 'Left' || key === 'Right')) {
+          input.preventDefault = true;
+        }
+    });
+  });
 
 
-app.commandLine.appendSwitch('disable-http-cache');
+  app.commandLine.appendSwitch('disable-http-cache');
 
 // 对应的 check-pending-install
 ipcMain.handle('check-pending-install', () => {
@@ -2822,5 +2823,4 @@ ipcMain.handle('check-pending-install', () => {
     } catch (e) { return null; }
   }
   return null;
-});
 });
