@@ -20,6 +20,7 @@ let vrmWindows = [];
 let thaWindows = [];
 let shotOverlay = null
 let minimalWindow = null
+let dynamicIslandWindow = null
 let isMac = process.platform === 'darwin';
 const vmcSendSocket = dgram.createSocket('udp4'); // 发送复用同一 socket
 const MAX_LOG_LINES = 2000; // 保留最近2000行日志
@@ -1652,6 +1653,74 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('get-minimal-window-state', async () => {
       return !!(minimalWindow && !minimalWindow.isDestroyed());
+    });
+
+    // === 灵动岛窗口 (全屏覆盖层) ===
+    ipcMain.handle('open-island-window', async () => {
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.close();
+        dynamicIslandWindow = null;
+      }
+
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { x, y, width: screenW, height: screenH } = primaryDisplay.bounds;
+      const isWindows = process.platform === 'win32';
+      const isLinux = process.platform === 'linux';
+      const windowType = isWindows ? 'toolbar' : 'panel';
+
+      dynamicIslandWindow = new BrowserWindow({
+        width: screenW,
+        height: screenH,
+        x: x,
+        y: y,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        resizable: false,
+        backgroundColor: '#00000000',
+        type: windowType,
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false,
+          webSecurity: false,
+          devTools: isDev,
+          preload: path.join(__dirname, 'static/js/preload.js')
+        }
+      });
+
+      remoteMain.enable(dynamicIslandWindow.webContents);
+
+      if (isLinux) {
+        dynamicIslandWindow.setIgnoreMouseEvents(true);
+      } else {
+        dynamicIslandWindow.setIgnoreMouseEvents(true, { forward: true });
+      }
+
+      await dynamicIslandWindow.loadURL(`http://${HOST}:${PORT}/island.html`);
+
+      dynamicIslandWindow.on('closed', () => {
+        dynamicIslandWindow = null;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('island-window-closed');
+        }
+      });
+
+      return true;
+    });
+
+    ipcMain.handle('close-island-window', async () => {
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.close();
+        dynamicIslandWindow = null;
+      }
+      return true;
+    });
+
+    ipcMain.handle('get-island-window-state', async () => {
+      return !!(dynamicIslandWindow && !dynamicIslandWindow.isDestroyed());
     });
 
 
