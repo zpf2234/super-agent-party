@@ -8312,7 +8312,6 @@ handleCreateSlackSeparator(val) {
     checkMobile() {
       this.isMobile = window.innerWidth <= 768;
       this.isAssistantMode = window.innerWidth <= 350 && window.innerHeight <= 820;
-      this.isCapsuleMode = window.innerWidth <= 220 && window.innerHeight <= 100;
       if (this.isMobile) {
         this.MoreButtonDict = this.smallMoreButtonDict;
       }
@@ -10476,10 +10475,28 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                 if (response.ok) {
                     await this._streamTTSResponse(response, message, index, chunk_expressions, chunk_text, vrmIndex, isVrmSilent);
                     this.checkAudioPlayback();
+                } else {
+                    console.warn(`TTS chunk ${index} returned ${response.status}, skipping`);
+                    message.audioChunks[index] = {
+                        url: null,
+                        expressions: chunk_expressions,
+                        text: chunk_text,
+                        index,
+                        _failed: true
+                    };
+                    this.checkAudioPlayback();
                 }
             }
         } catch (error) {
             console.error(`TTS Chunk ${index} error:`, error);
+            message.audioChunks[index] = {
+                url: null,
+                expressions: chunk_expressions,
+                text: chunk_text,
+                index,
+                _failed: true
+            };
+            this.checkAudioPlayback();
         }
     },
 
@@ -10715,6 +10732,15 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
         const rawVoice = lastMessage.chunks_voice[currentIndex] || '';
         const isVrmSilent = rawVoice.startsWith('danmaku_vrm_silent:');
         const actualVoice = isVrmSilent ? rawVoice.replace('danmaku_vrm_silent:', '') : rawVoice;
+
+        // --- 防御：合成的占位失败块直接跳过，避免 queue 死等 ---
+        if (audioChunk && audioChunk._failed) {
+            console.warn(`Skipping failed TTS chunk ${currentIndex}`);
+            lastMessage.currentChunk++;
+            setTimeout(() => this.checkAudioPlayback(message, resolve), 0);
+            return;
+        }
+
         
         // 计算偏移
         const offset = lastMessage.chunks_voice.filter(v => v.startsWith('danmaku_vrm_silent:')).length;
@@ -10891,6 +10917,8 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
 
     // 停止所有正在播放的音频
     stopAllAudioPlayback() {
+      // --- 与 sendMessage 入口对齐：任何调用本函数的路径都强制释放弹幕队列锁 ---
+      this.TTSrunning = false;
       // --- 核心修复 1：给所有消息打上"终止循环"的标记 ---
       this.messages.forEach(message => {
         message.audioAborted = true; 
@@ -14176,16 +14204,24 @@ isTargetPlatform(behavior, platformKey) {
       window.electronAPI.windowAction('show');
     }
   },
-  async toggleCapsuleMode() {
-    this.activeMenu = 'home';
-    this.isPttMode = false;
-    if (this.isCapsuleMode && !this.isMac) {
-      window.electronAPI.windowAction('maximize') // 恢复默认大小
-    } else{
-      window.electronAPI.toggleWindowSize(210, 80);
+  async toggleDynamicIsland() {
+    if (!this.isDynamicIsland) {
+      if (isElectron && window.electronAPI.openIslandWindow) {
+        window.electronAPI.openIslandWindow();
+        this.isDynamicIsland = true;
+        if (window.electronAPI.onIslandWindowClosed) {
+          window.electronAPI.onIslandWindowClosed(() => {
+            this.isDynamicIsland = false;
+          });
+        }
+      }
+    } else {
+      if (isElectron && window.electronAPI.closeIslandWindow) {
+        window.electronAPI.closeIslandWindow();
+      }
+      this.isDynamicIsland = false;
     }
     this.sidePanelOpen = false;
-    this.isCapsuleMode = !this.isCapsuleMode;
   },
   toggleMinimalMode() {
     if (!this.isMinimalMode) {

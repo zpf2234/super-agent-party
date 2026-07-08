@@ -35,6 +35,7 @@ function createIslandApp() {
         currentTrack: '',
         currentArtist: '',
         lastPlayAction: 0,
+        musicMissCount: 0,
         volume: 50,
         marqueeAnim: null,
 
@@ -75,11 +76,6 @@ function createIslandApp() {
       weatherIcon() {
         return WEATHER_ICONS[this.weatherDesc] || 'fa-cloud';
       },
-      panelsTransform() {
-        const base = -(this.activePanel * 50);
-        const offset = this.isDragging ? (this.dragOffset / (this._panelWidth || 420) * 100) : 0;
-        return `translateX(${base + offset}%)`;
-      },
       isQuickView() {
         return this.mode === 'quick';
       },
@@ -94,7 +90,17 @@ function createIslandApp() {
       },
       playIcon() {
         return this.isPlaying ? 'fa-pause' : 'fa-play';
-      }
+      },
+      // Reactive panel transforms — triggers Vue re-render on dragOffset change
+      panelTransforms() {
+        const p0Base = -this.activePanel * 100;
+        const p1Base = (1 - this.activePanel) * 100;
+        const dragPct = this.isDragging ? (this.dragOffset / (this._panelWidth || 420) * 100) : 0;
+        return {
+          p0: `translateX(${p0Base + dragPct}%)`,
+          p1: `translateX(${p1Base + dragPct}%)`
+        };
+      },
     },
 
     created() {
@@ -110,12 +116,16 @@ function createIslandApp() {
       const container = this.$el;
       container.addEventListener('mouseleave', this.onContainerLeave);
 
+      // Document-level: clicks outside the island collapse large mode
+      document.addEventListener('mousedown', this.onDocMouseDown);
+
       // Start weather polling
       this.fetchWeather();
       this.weatherTimer = setInterval(this.fetchWeather, 600000);
     },
 
     beforeUnmount() {
+      document.removeEventListener('mousedown', this.onDocMouseDown);
       this.stopMusicPoll();
       this.stopMarquee();
       this.unregisterMcpTools();
@@ -159,6 +169,16 @@ function createIslandApp() {
         }
       },
 
+      onDocMouseDown(e) {
+        if (this.mode === 'large') {
+          const island = this.$refs.island;
+          if (island && !island.contains(e.target)) {
+            this.mode = 'still';
+            this.setMouseIgnore(true);
+          }
+        }
+      },
+
       onContainerLeave() {
         if (this.mode !== 'large' && this.isHovered) {
           this.mode = 'still';
@@ -166,8 +186,8 @@ function createIslandApp() {
         }
       },
 
-      onContainerClick() {
-        if (this.mode === 'large') {
+      onContainerMouseDown(e) {
+        if (this.mode === 'large' && e.target === e.currentTarget) {
           this.mode = 'still';
           this.setMouseIgnore(true);
         }
@@ -189,10 +209,15 @@ function createIslandApp() {
         this.dragOffset = 0;
         this.isDragging = true;
         this.suppressClick = false;
-        this._panelWidth = this.$refs.panelsTrack ? this.$refs.panelsTrack.offsetWidth / 2 : 420;
-        // Remove transition during drag for instant response
-        if (this.$refs.panelsTrack) {
-          this.$refs.panelsTrack.style.transition = 'none';
+        this._panelWidth = this.$refs.island ? this.$refs.island.offsetWidth : 420;
+        // Remove transition on all panels during drag for instant response
+        const wrapper = this.$refs.panelsWrapper;
+        if (wrapper) {
+          wrapper.querySelectorAll('.panel').forEach(p => { p.style.transition = 'none'; });
+        }
+        const captureEl = this.$refs.island || e.target;
+        if (captureEl.setPointerCapture) {
+          captureEl.setPointerCapture(e.pointerId);
         }
       },
 
@@ -201,24 +226,22 @@ function createIslandApp() {
         if (!this.isDragging) return;
         const dx = e.clientX - this.swipeStartX;
         const dy = e.clientY - this.swipeStartY;
-        if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
           this.swipeMoved = true;
         }
-        if (this.swipeMoved) {
-          this.dragOffset = dx;
-          if (e.target.setPointerCapture) {
-            e.target.setPointerCapture(e.pointerId);
-          }
-        }
+        this.dragOffset = dx;
       },
 
       onPointerUp(e) {
-        if (this.mode !== 'large') return;
+        if (!this.isDragging) return;
         this.isDragging = false;
+        if (e.target.releasePointerCapture && e.pointerId != null) {
+          e.target.releasePointerCapture(e.pointerId);
+        }
         const dx = e.clientX - this.swipeStartX;
-        // Restore transition for snap animation
-        if (this.$refs.panelsTrack) {
-          this.$refs.panelsTrack.style.transition = '';
+        const wrapper = this.$refs.panelsWrapper;
+        if (wrapper) {
+          wrapper.querySelectorAll('.panel').forEach(p => { p.style.transition = ''; });
         }
         if (this.swipeMoved && Math.abs(dx) > Math.abs(e.clientY - this.swipeStartY)) {
           if (Math.abs(dx) >= 40) {
@@ -342,6 +365,7 @@ function createIslandApp() {
 
       handleMusicState(data) {
         if (data.track) {
+          this.musicMissCount = 0;
           const t = data.track.replace(/^["\s]+|["\s]+$/g, '');
           const a = (data.artist || '').replace(/^["\s]+|["\s]+$/g, '');
           if (!this.hasMusic || t !== this.currentTrack || a !== this.currentArtist) {
@@ -354,12 +378,16 @@ function createIslandApp() {
           }
           if (this.isPlaying && this.mode !== 'large') this.startMarquee();
         } else {
-          if (this.hasMusic) {
-            this.hasMusic = false;
-            this.currentTrack = '';
-            this.currentArtist = '';
-            this.isPlaying = false;
-            this.stopMarquee();
+          this.musicMissCount++;
+          if (this.musicMissCount >= 3) {
+            if (this.hasMusic) {
+              this.hasMusic = false;
+              this.currentTrack = '';
+              this.currentArtist = '';
+              this.isPlaying = false;
+              this.stopMarquee();
+            }
+            this.musicMissCount = 0;
           }
         }
       },
@@ -467,27 +495,64 @@ function createIslandApp() {
       },
 
       // ===== Marquee =====
+      // 用单段文字 + 复制的方式做无缝循环。关键点：
+      //   1. 两个 item 之间的间距应该等于容器宽度 (boxWidth)，这样一次只看到一段歌词，
+      //      第二段从右边出来时第一段已经从左边消失，避免视觉重叠。
+      //   2. 动画位移 = itemWidth + spacing，end-start 完全等于循环周期，无缝衔接。
+      //   3. 每秒检测一次动画是否还在跑 (playState === 'running')，跑马灯卡住就重启。
       startMarquee() {
         const text = this.currentTrack + (this.currentArtist ? '  \u2022  ' + this.currentArtist : '');
-        if (this._marqueeText === text && this.marqueeAnim) return;
+        const changed = this._marqueeText !== text;
         this._marqueeText = text;
+        if (!changed && this.marqueeAnim && this.marqueeAnim.playState === 'running') return;
         this.stopMarquee();
-        this.$nextTick(() => {
-          const track = this.$refs.marqueeTrack;
-          if (!track) return;
-          const a = track.querySelector('.marquee-item');
-          if (!a) return;
-          const copyWidth = a.offsetWidth;
-          const dur = Math.max(10, copyWidth / 35) * 1000;
-          this.marqueeAnim = track.animate(
-            [{ transform: 'translateX(0)' }, { transform: `translateX(-${copyWidth}px)` }],
-            { duration: dur, iterations: Infinity, easing: 'linear' }
-          );
-        });
+        if (!text) return;
+        // 等待 DOM 渲染完成 (v-if 切换 / 文本变化)
+        this.$nextTick(() => this._buildMarquee());
+      },
+
+      _buildMarquee() {
+        const track = this.$refs.marqueeTrack;
+        if (!track) return;
+        const items = track.querySelectorAll('.marquee-item');
+        if (items.length < 2) return;
+        const a = items[0];
+        const b = items[1];
+        const box = track.parentElement;
+        if (!box) return;
+        const itemWidth = a.offsetWidth;
+        const boxWidth = box.offsetWidth;
+        if (!itemWidth || !boxWidth) return;
+        // 间距略小于容器宽度，保证一次只显示一段但留出微小余量
+        const spacing = Math.max(boxWidth - 8, itemWidth);
+        // 通过 margin 而非 CSS gap 控制间距，避免和 JS 计算冲突
+        a.style.marginRight = spacing + 'px';
+        b.style.marginRight = spacing + 'px';
+        const itemStep = itemWidth + spacing;
+        // 速度：每秒约 35 像素
+        const dur = Math.max(8000, (itemStep / 35) * 1000);
+        this.marqueeAnim = track.animate(
+          [
+            { transform: 'translateX(0)' },
+            { transform: `translateX(-${itemStep}px)` }
+          ],
+          { duration: dur, iterations: Infinity, easing: 'linear' }
+        );
+        // 兜底：检测卡死 (浏览器在最小化/切换 tab 时会暂停动画，恢复后可能不自动 play)
+        if (this.marqueeTimer) clearInterval(this.marqueeTimer);
+        this.marqueeTimer = setInterval(() => {
+          if (!this.isPlaying || this.mode === 'large') return;
+          if (!this.marqueeAnim) {
+            this._buildMarquee();
+          } else if (this.marqueeAnim.playState !== 'running') {
+            this.marqueeAnim.play();
+          }
+        }, 1000);
       },
 
       stopMarquee() {
         if (this.marqueeAnim) { this.marqueeAnim.cancel(); this.marqueeAnim = null; }
+        if (this.marqueeTimer) { clearInterval(this.marqueeTimer); this.marqueeTimer = null; }
       },
 
       closeWindow() {
@@ -505,11 +570,19 @@ function createIslandApp() {
           this.stopMarquee();
         }
       },
-      mode(val) {
-        if (val !== 'large') {
+      mode(val, oldVal) {
+        if (val === 'large') {
           this.stopMarquee();
-          if (this.isPlaying) {
-            this.$nextTick(() => this.startMarquee());
+        } else {
+          if (oldVal === 'large') {
+            // Only full restart when exiting large mode
+            this.stopMarquee();
+            if (this.isPlaying) {
+              this.$nextTick(() => this.startMarquee());
+            }
+          } else if (!this.marqueeAnim && this.isPlaying) {
+            // Marquee not running — start it (still↔quick doesn't restart)
+            this.startMarquee();
           }
         }
       }

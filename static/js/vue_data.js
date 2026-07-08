@@ -826,7 +826,7 @@ let vue_data = {
     openaiVoices:['alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse'],
     showMoreButtonDialog: false,
     isAssistantMode: false,
-    isCapsuleMode: false,
+    isDynamicIsland: false,
     isMinimalMode: false,
     isFixedWindow: false,
     MoreButtonDict: [

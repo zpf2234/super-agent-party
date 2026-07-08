@@ -57,6 +57,19 @@ from py.computer_use_tool import (
 )
 from py.mode_change import mode_change_tool, update_workspace_settings
 from py.acpx_tools import acp_agent_tool, acpx_agent
+from py.dynamic_island import (
+    island_enable as dynamic_island_enable,
+    island_disable as dynamic_island_disable,
+    get_island_tools,
+    is_island_enabled,
+    island_music_play,
+    island_music_pause,
+    island_music_next,
+    island_music_prev,
+    island_music_get_info,
+    island_music_set_volume,
+    island_track_set,
+)
 
 # Extended CLI tool imports for dispatch_tool
 from py.cli_tool import (
@@ -11962,6 +11975,65 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "node_ext_mcp_unregistered",
                         "data": {"ext_id": ext_id}
                     })
+
+            elif msg_type == "island_enable":
+                result = dynamic_island_enable()
+                print(f"[DynamicIsland] 前端请求启用: {result}")
+                await ws_manager.broadcast({
+                    "type": "island_state",
+                    "data": result
+                })
+                await ws_manager.broadcast({
+                    "type": "node_ext_mcp_registered",
+                    "data": {
+                        "ext_id": "dynamic_island",
+                        "tools": result.get("tools", [])
+                    }
+                })
+
+            elif msg_type == "island_disable":
+                result = dynamic_island_disable()
+                print(f"[DynamicIsland] 前端请求禁用: {result}")
+                await ws_manager.broadcast({
+                    "type": "island_state",
+                    "data": result
+                })
+                await ws_manager.broadcast({
+                    "type": "node_ext_mcp_unregistered",
+                    "data": {"ext_id": "dynamic_island"}
+                })
+
+            elif msg_type == "island_music_control":
+                action = data.get("data", {}).get("action")
+                if action == "play":
+                    result = island_music_play()
+                elif action == "pause":
+                    result = island_music_pause()
+                elif action == "next":
+                    result = island_music_next()
+                elif action == "prev":
+                    result = island_music_prev()
+                elif action == "volume":
+                    level = data.get("data", {}).get("level", 50)
+                    result = island_music_set_volume(int(level))
+                else:
+                    result = "未知操作"
+                await ws_manager.send_json({
+                    "type": "island_music_result",
+                    "data": {"action": action, "result": result}
+                }, websocket)
+
+            elif msg_type == "island_track_set":
+                track_info = data.get("data", {})
+                await island_track_set(ws_manager, track_info)
+
+            elif msg_type == "island_poll_music":
+                from py.dynamic_island import poll_music_state
+                state = await poll_music_state()
+                await ws_manager.send_json({
+                    "type": "island_music_state",
+                    "data": state
+                }, websocket)
 
             elif msg_type == "mcp_tool_result":
                 call_id = data.get("data", {}).get("call_id")

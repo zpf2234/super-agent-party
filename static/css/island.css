@@ -25,6 +25,7 @@
   position: fixed; top: 0; left: 0;
   width: 100vw; height: 100vh;
   z-index: 2147483647;
+  pointer-events: none;
 }
 
 /* 岛主体 */
@@ -94,7 +95,19 @@
   border-right: 1px solid rgba(255,255,255,0.15);
 }
 
-/* Quick 左边：封面 + 跑马灯 */
+/* 音乐全宽 跑马灯（占满整个 quick 矩形） */
+.music-full {
+  gap: 8px;
+  padding: 0 4px;
+}
+.music-full .artwork-wrap {
+  flex-shrink: 0;
+}
+.music-full .marquee-box {
+  flex: 1;
+}
+
+/* Quick 左边：封面 + 跑马灯（已废弃，保留兼容） */
 .quick-left {
   display: flex; align-items: center; gap: 6px;
   flex: 1; min-width: 0; overflow: hidden;
@@ -117,13 +130,21 @@
   -webkit-mask-image: linear-gradient(to right, transparent 0%, black 10px, black calc(100% - 10px), transparent 100%);
 }
 .marquee-track {
-  display: inline-flex; white-space: nowrap;
+  display: flex; white-space: nowrap;
   height: 40px; line-height: 40px;
 }
 .marquee-item {
   font-size: 13px; font-weight: 500;
   white-space: nowrap; pointer-events: none;
-  padding-right: 40px;
+  flex-shrink: 0;
+}
+
+/* Quick 日期 */
+.quick-date {
+  font-size: 11px; font-weight: 400;
+  color: rgba(255,255,255,0.5);
+  flex-shrink: 0;
+  padding: 0 4px;
 }
 
 /* 右侧按钮 */
@@ -153,21 +174,16 @@
 .panels-wrapper {
   width: 100%; flex: 1;
   overflow: hidden;
-  display: flex; align-items: flex-start;
-}
-.panels-track {
-  display: flex;
-  width: 200%;
-  height: 100%;
-  transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
-  will-change: transform;
-  touch-action: pan-y;
+  position: relative;
 }
 .panel {
-  flex: 0 0 50%;
-  height: 100%;
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
+  transition: transform 0.35s cubic-bezier(0.4,0,0.2,1);
+  will-change: transform;
   padding: 0 20px 10px;
 }
 
