@@ -166,6 +166,13 @@ function createIslandApp() {
         }
       },
 
+      onContainerClick() {
+        if (this.mode === 'large') {
+          this.mode = 'still';
+          this.setMouseIgnore(true);
+        }
+      },
+
       setMouseIgnore(ignore) {
         if (window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
           window.electronAPI.setIgnoreMouseEvents(ignore, { forward: true });
@@ -461,6 +468,9 @@ function createIslandApp() {
 
       // ===== Marquee =====
       startMarquee() {
+        const text = this.currentTrack + (this.currentArtist ? '  \u2022  ' + this.currentArtist : '');
+        if (this._marqueeText === text && this.marqueeAnim) return;
+        this._marqueeText = text;
         this.stopMarquee();
         this.$nextTick(() => {
           const track = this.$refs.marqueeTrack;
@@ -498,7 +508,7 @@ function createIslandApp() {
       mode(val) {
         if (val !== 'large') {
           this.stopMarquee();
-          if (this.isPlaying && val === 'quick') {
+          if (this.isPlaying) {
             this.$nextTick(() => this.startMarquee());
           }
         }

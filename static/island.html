@@ -18,7 +18,7 @@
   </style>
 </head>
 <body>
-  <div id="island-container">
+  <div id="island-container" @click.self="onContainerClick">
     <div id="island"
          :class="{ quick: isQuickView, large: isLargeView }"
          @mouseenter="onIslandEnter"
