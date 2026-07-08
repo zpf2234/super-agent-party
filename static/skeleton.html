@@ -267,11 +267,6 @@
         preloadFrame.src = mainPageUrl;
 
         preloadFrame.onload = function() {
-          // 主页面所有资源已缓存完毕，通知主进程开始 loadURL
-          if (window.electron && window.electron.ipcRenderer && window.electron.ipcRenderer.send) {
-            window.electron.ipcRenderer.send('skeleton-fadeout-done');
-          }
-
           // 播放 fade-out 动画覆盖 loadURL 过程中的短暂闪烁
           setTimeout(() => {
             document.getElementById('app').classList.add('fade-out');
