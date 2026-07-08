@@ -137,6 +137,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('minimal-window-closed');
     ipcRenderer.on('minimal-window-closed', () => callback());
   },
+  openIslandWindow: () => ipcRenderer.invoke('open-island-window'),
+  closeIslandWindow: () => ipcRenderer.invoke('close-island-window'),
+  getIslandWindowState: () => ipcRenderer.invoke('get-island-window-state'),
+  onIslandWindowClosed: (callback) => {
+    ipcRenderer.removeAllListeners('island-window-closed');
+    ipcRenderer.on('island-window-closed', () => callback());
+  },
   getBackendLogs: () => ipcRenderer.invoke('get-backend-logs'),
 
   onRemoteInstall: (callback) => ipcRenderer.on('remote-install-any', (_, payload) => callback(payload)),
@@ -155,6 +162,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('workspace-changed');
     ipcRenderer.on('workspace-changed', (_, data) => callback(data));
   },
+
+  // 多账户管理
+  accountsGetAll: () => ipcRenderer.invoke('accounts:get-all'),
+  accountsGetCurrent: () => ipcRenderer.invoke('accounts:get-current'),
+  accountsCreate: (name, dataPath, cloneFromRoot, setAsDefault) =>
+    ipcRenderer.invoke('accounts:create', { name, dataPath, cloneFromRoot, setAsDefault }),
+  accountsDelete: (accountId, removeFolder) =>
+    ipcRenderer.invoke('accounts:delete', { accountId, removeFolder }),
+  accountsRename: (accountId, newName) =>
+    ipcRenderer.invoke('accounts:rename', { accountId, newName }),
+  accountsSetDefault: (accountId) =>
+    ipcRenderer.invoke('accounts:set-default', { accountId }),
+  accountsLaunch: (accountId) =>
+    ipcRenderer.invoke('accounts:launch', { accountId }),
+  accountsSwitch: (accountId) =>
+    ipcRenderer.invoke('accounts:switch', { accountId }),
 });
 
 contextBridge.exposeInMainWorld('vmcAPI', {
