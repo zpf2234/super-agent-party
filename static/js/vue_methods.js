@@ -10704,6 +10704,8 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                         this.TTSrunning = false; 
                     }
                     lastMessage._ttsRunning = false;
+                    // 全部播完后，把进度归位到第一块，UI 显示 1/totalChunks 而非越界
+                    lastMessage.currentChunk = 0;
                     try { fetch('/api/overlay/danmaku/clear', { method: 'POST' }).catch(()=>{}); } catch(e){}
                     if (resolve) resolve();
                     return;
@@ -10717,6 +10719,7 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
                             this.TTSrunning = false; 
                         }
                         lastMessage._ttsRunning = false;
+                        lastMessage.currentChunk = 0;
                         try { fetch('/api/overlay/danmaku/clear', { method: 'POST' }).catch(()=>{}); } catch(e){}
                         if (resolve) resolve();
                         return;
