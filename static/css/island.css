@@ -165,11 +165,11 @@
   touch-action: pan-y;
 }
 .panel {
-  width: 50%; height: 100%;
+  flex: 0 0 50%;
+  height: 100%;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   padding: 0 20px 10px;
-  flex-shrink: 0;
 }
 
 /* 面板指示器 */

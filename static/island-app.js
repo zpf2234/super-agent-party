@@ -59,6 +59,8 @@ function createIslandApp() {
         swipeStartX: 0,
         swipeStartY: 0,
         swipeMoved: false,
+        dragOffset: 0,
+        isDragging: false,
         wheelAccum: 0,
         wheelLock: false,
         suppressClick: false
@@ -74,7 +76,9 @@ function createIslandApp() {
         return WEATHER_ICONS[this.weatherDesc] || 'fa-cloud';
       },
       panelsTransform() {
-        return `translateX(-${this.activePanel * 50}%)`;
+        const base = -(this.activePanel * 50);
+        const offset = this.isDragging ? (this.dragOffset / (this._panelWidth || 420) * 100) : 0;
+        return `translateX(${base + offset}%)`;
       },
       isQuickView() {
         return this.mode === 'quick';
@@ -175,26 +179,51 @@ function createIslandApp() {
         this.swipeStartX = e.clientX;
         this.swipeStartY = e.clientY;
         this.swipeMoved = false;
+        this.dragOffset = 0;
+        this.isDragging = true;
         this.suppressClick = false;
+        this._panelWidth = this.$refs.panelsTrack ? this.$refs.panelsTrack.offsetWidth / 2 : 420;
+        // Remove transition during drag for instant response
+        if (this.$refs.panelsTrack) {
+          this.$refs.panelsTrack.style.transition = 'none';
+        }
       },
 
       onPointerMove(e) {
         if (this.mode !== 'large') return;
-        if (!this.swipeStartX) return;
+        if (!this.isDragging) return;
         const dx = e.clientX - this.swipeStartX;
         const dy = e.clientY - this.swipeStartY;
         if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
           this.swipeMoved = true;
         }
+        if (this.swipeMoved) {
+          this.dragOffset = dx;
+          if (e.target.setPointerCapture) {
+            e.target.setPointerCapture(e.pointerId);
+          }
+        }
       },
 
       onPointerUp(e) {
         if (this.mode !== 'large') return;
+        this.isDragging = false;
         const dx = e.clientX - this.swipeStartX;
-        if (this.swipeMoved && Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(e.clientY - this.swipeStartY)) {
-          this.movePanel(dx > 0 ? -1 : 1);
-          this.suppressClick = true;
+        // Restore transition for snap animation
+        if (this.$refs.panelsTrack) {
+          this.$refs.panelsTrack.style.transition = '';
         }
+        if (this.swipeMoved && Math.abs(dx) > Math.abs(e.clientY - this.swipeStartY)) {
+          if (Math.abs(dx) >= 40) {
+            const dir = dx < 0 ? 1 : -1;
+            const newPanel = this.activePanel + dir;
+            if (newPanel >= 0 && newPanel <= 1) {
+              this.activePanel = newPanel;
+            }
+            this.suppressClick = true;
+          }
+        }
+        this.dragOffset = 0;
         this.swipeStartX = 0;
         this.swipeStartY = 0;
       },
@@ -212,10 +241,13 @@ function createIslandApp() {
       },
 
       movePanel(dir) {
-        this.activePanel = (this.activePanel + dir + 2) % 2;
+        const next = this.activePanel + dir;
+        if (next < 0 || next > 1) return;
+        this.activePanel = next;
       },
 
       switchPanel(idx) {
+        if (idx < 0 || idx > 1) return;
         this.activePanel = idx;
       },
 
