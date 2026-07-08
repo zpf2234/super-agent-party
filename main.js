@@ -1191,6 +1191,21 @@ app.whenReady().then(async () => {
     // 等待后端服务准备就绪
     await waitForBackend()
     
+    // 骨架屏 fade-out 完成通知：在此时创建 Promise，确保 IPC 到达时 resolver 已就位
+    // 兜底超时：若骨架屏异常未发送通知（如 preload 失败），最长等待 5s 后强制加载
+    const skeletonFadeoutPromise = new Promise((resolve) => {
+      const fadeoutTimeout = setTimeout(() => {
+        console.log('⚠️ 骨架屏 fade-out 超时（5s），强制加载主页面');
+        resolve();
+      }, 5000);
+
+      ipcMain.once('skeleton-fadeout-done', () => {
+        console.log('✅ 骨架屏 fade-out 完成，开始加载主页面');
+        clearTimeout(fadeoutTimeout);
+        resolve();
+      });
+    });
+
     // 后端服务准备就绪后，加载完整内容
     console.log(`Backend server is running at http://${HOST}:${PORT}`)
 
@@ -1250,13 +1265,6 @@ app.whenReady().then(async () => {
         isDefaultPort: PORT === DEFAULT_PORT
       }
     })
-
-    // 骨架屏 fade-out 动画完成通知：仅触发一次，用于触发主进程加载主页面
-    let skeletonFadeoutDone;
-    ipcMain.once('skeleton-fadeout-done', () => {
-      console.log('✅ 骨架屏 fade-out 完成，开始加载主页面');
-      if (skeletonFadeoutDone) skeletonFadeoutDone();
-    });
 
     ipcMain.handle('set-env', async (event, arg) => {
       saveEnvVariable(arg.key, arg.value);
@@ -2023,11 +2031,7 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
     });
             
     // 等待骨架屏 fade-out 动画完成后再加载主页面，避免样式闪烁
-    // 兜底超时：若骨架屏异常未发送通知（如 preload 失败），最长等待 5s 后强制加载
-    await new Promise((resolve) => {
-      skeletonFadeoutDone = resolve;
-      setTimeout(() => resolve(), 5000);
-    });
+    await skeletonFadeoutPromise;
 
     // 加载主页面
     await mainWindow.loadURL(`http://${HOST}:${PORT}`)
