@@ -54,6 +54,98 @@ ISLAND_TOOLS_SCHEMA = [
 ]
 
 
+def _mpris_call(method_name):
+    import platform
+    if platform.system() != "Linux":
+        return False
+    try:
+        from jeepney import DBusAddress, new_method_call
+        from jeepney.io.blocking import open_dbus_connection
+
+        with open_dbus_connection(bus='SESSION') as conn:
+            list_msg = new_method_call(
+                DBusAddress('/org/freedesktop/DBus',
+                            bus_name='org.freedesktop.DBus',
+                            interface='org.freedesktop.DBus'),
+                'ListNames'
+            )
+            reply = conn.send_and_get_reply(list_msg, timeout=5)
+            players = [n for n in reply.body[0] if n.startswith('org.mpris.MediaPlayer2.')]
+            if not players:
+                return False
+
+            player_addr = DBusAddress(
+                '/org/mpris/MediaPlayer2',
+                bus_name=players[0],
+                interface='org.mpris.MediaPlayer2.Player'
+            )
+            conn.send_and_get_reply(new_method_call(player_addr, method_name), timeout=5)
+            return True
+    except Exception:
+        return False
+
+
+def _mpris_get_metadata():
+    import platform
+    if platform.system() != "Linux":
+        return None
+    try:
+        from jeepney import DBusAddress, new_method_call
+        from jeepney.io.blocking import open_dbus_connection
+
+        with open_dbus_connection(bus='SESSION') as conn:
+            list_msg = new_method_call(
+                DBusAddress('/org/freedesktop/DBus',
+                            bus_name='org.freedesktop.DBus',
+                            interface='org.freedesktop.DBus'),
+                'ListNames'
+            )
+            reply = conn.send_and_get_reply(list_msg, timeout=5)
+            players = [n for n in reply.body[0] if n.startswith('org.mpris.MediaPlayer2.')]
+            if not players:
+                return None
+
+            player = players[0]
+
+            props_addr = DBusAddress(
+                '/org/mpris/MediaPlayer2',
+                bus_name=player,
+                interface='org.freedesktop.DBus.Properties'
+            )
+
+            status_msg = new_method_call(props_addr, 'Get', 'ss',
+                                         ('org.mpris.MediaPlayer2.Player', 'PlaybackStatus'))
+            status_reply = conn.send_and_get_reply(status_msg, timeout=5)
+            status = status_reply.body[0][1]
+
+            meta_msg = new_method_call(props_addr, 'Get', 'ss',
+                                       ('org.mpris.MediaPlayer2.Player', 'Metadata'))
+            meta_reply = conn.send_and_get_reply(meta_msg, timeout=5)
+            metadata = meta_reply.body[0][1]
+
+            title = ""
+            artist = ""
+            art_url = None
+
+            for key, val in metadata.items():
+                if key == 'xesam:title':
+                    title = str(val[1])
+                elif key == 'xesam:artist':
+                    artist = str(val[1][0]) if val[1] else ""
+                elif key == 'mpris:artUrl':
+                    art_url = str(val[1])
+
+            return {
+                "track": title if title else "播放中",
+                "artist": artist,
+                "isPlaying": status == "Playing",
+                "artworkUrl": art_url,
+                "sourceAppId": player.replace("org.mpris.MediaPlayer2.", "")
+            }
+    except Exception:
+        return None
+
+
 def _media_key(key_name: str):
     try:
         import pyautogui
@@ -64,21 +156,41 @@ def _media_key(key_name: str):
 
 
 def island_music_play():
+    import platform
+    if platform.system() == "Linux":
+        if _mpris_call('PlayPause'):
+            return "已发送播放指令。"
+        return "未检测到 MPRIS 播放器。"
     _media_key('playpause')
     return "已发送播放指令。"
 
 
 def island_music_pause():
+    import platform
+    if platform.system() == "Linux":
+        if _mpris_call('PlayPause'):
+            return "已发送暂停指令。"
+        return "未检测到 MPRIS 播放器。"
     _media_key('playpause')
     return "已发送暂停指令。"
 
 
 def island_music_next():
+    import platform
+    if platform.system() == "Linux":
+        if _mpris_call('Next'):
+            return "已切换到下一首。"
+        return "未检测到 MPRIS 播放器。"
     _media_key('nexttrack')
     return "已切换到下一首。"
 
 
 def island_music_prev():
+    import platform
+    if platform.system() == "Linux":
+        if _mpris_call('Previous'):
+            return "已切换到上一首。"
+        return "未检测到 MPRIS 播放器。"
     _media_key('prevtrack')
     return "已切换到上一首。"
 
@@ -345,28 +457,9 @@ return output
             return result
 
     elif platform.system() == "Linux":
-        import subprocess, asyncio
-        def _query_linux():
-            try:
-                rc = subprocess.run(["playerctl", "status"], capture_output=True, text=True, timeout=4)
-                if rc.stdout.strip():
-                    rc2 = subprocess.run(
-                        ["playerctl", "metadata", "--format", "{{title}}||{{artist}}||{{status}}||{{mpris:artUrl}}"],
-                        capture_output=True, text=True, timeout=4
-                    )
-                    parts = rc2.stdout.strip().split("||", 3)
-                    return {
-                        "track": parts[0] if parts[0] else "播放中",
-                        "artist": parts[1] if len(parts) > 1 and parts[1] else "",
-                        "isPlaying": "playing" in (parts[2] or rc.stdout.strip()).lower() if len(parts) > 2 else (rc.stdout.strip().lower() == "playing"),
-                        "artworkUrl": parts[3] if len(parts) > 3 else None,
-                        "sourceAppId": "System"
-                    }
-            except Exception:
-                pass
-            return None
+        import asyncio
 
-        linux_data = await asyncio.to_thread(_query_linux)
+        linux_data = await asyncio.to_thread(_mpris_get_metadata)
         if linux_data:
             result.update(linux_data)
             return result
