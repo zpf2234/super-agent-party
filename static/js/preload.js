@@ -9,7 +9,7 @@ let vmcCfg = { receive:{enable:false,port:39539,syncExpression: false}, send:{en
 // 主进程推送最新配置
 ipcRenderer.on('vmc-config-changed', (_, cfg) => { vmcCfg = cfg; });
 
-// 与 main.js 保持一致的服务器配置
+// 与 main.js 保持一致的默认服务器配置（仅作 fallback，端口被占用时主进程会通过 backend-ready 推送真实值）
 const HOST = '127.0.0.1'
 const PORT = 3456
 // 获取从主进程传递的配置数据
@@ -23,17 +23,26 @@ contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
     on: (channel, func) => {
       // 只允许特定的通道
-      const validChannels = ['backend-ready', 'trigger-search']; 
+      const validChannels = ['backend-ready', 'trigger-search'];
       if (validChannels.includes(channel)) {
         ipcRenderer.on(channel, (event, ...args) => func(...args));
       }
+    },
+    send: (channel, ...args) => {
+      // 仅允许骨架屏通知主进程动画完成
+      const validSendChannels = ['skeleton-fadeout-done'];
+      if (validSendChannels.includes(channel)) {
+        ipcRenderer.send(channel, ...args);
+      }
     }
   },
-  // 暴露服务器配置
+  // 暴露服务器配置（动态：backend-ready 推送前用默认值，推送后用真实值）
   server: {
     host: HOST,
     port: PORT
   },
+  // 同步获取服务器信息（host/port）
+  getServerInfo: () => ipcRenderer.invoke('get-server-info'),
   requestStopQQBot: () => ipcRenderer.invoke('request-stop-qqbot'),
   requestStopFeishuBot : () => ipcRenderer.invoke('request-stop-feishubot'),
   requestStopWechatBot : () => ipcRenderer.invoke('request-stop-wechatbot'),

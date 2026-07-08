@@ -836,7 +836,7 @@ async function waitForBackend() {
       if (response.ok) {
         console.log('✨ 后端健康检查通过！');
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('backend-ready', { port: PORT });
+          mainWindow.webContents.send('backend-ready', { host: HOST, port: PORT });
         }
         return;
       }
@@ -1244,11 +1244,19 @@ app.whenReady().then(async () => {
     // 添加获取端口信息的 IPC 处理
     ipcMain.handle('get-server-info', () => {
       return {
+        host: HOST,
         port: PORT,
         defaultPort: DEFAULT_PORT,
         isDefaultPort: PORT === DEFAULT_PORT
       }
     })
+
+    // 骨架屏 fade-out 动画完成通知：仅触发一次，用于触发主进程加载主页面
+    let skeletonFadeoutDone;
+    ipcMain.once('skeleton-fadeout-done', () => {
+      console.log('✅ 骨架屏 fade-out 完成，开始加载主页面');
+      if (skeletonFadeoutDone) skeletonFadeoutDone();
+    });
 
     ipcMain.handle('set-env', async (event, arg) => {
       saveEnvVariable(arg.key, arg.value);
@@ -2014,6 +2022,13 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       setTimeout(() => autoUpdater.quitAndInstall(), 500);
     });
             
+    // 等待骨架屏 fade-out 动画完成后再加载主页面，避免样式闪烁
+    // 兜底超时：若骨架屏异常未发送通知（如 preload 失败），最长等待 5s 后强制加载
+    await new Promise((resolve) => {
+      skeletonFadeoutDone = resolve;
+      setTimeout(() => resolve(), 5000);
+    });
+
     // 加载主页面
     await mainWindow.loadURL(`http://${HOST}:${PORT}`)
     ipcMain.on('set-language', (_, lang) => {
