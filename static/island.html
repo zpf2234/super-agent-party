@@ -21,7 +21,7 @@
   <div id="island-container">
     <div id="island"
          ref="island"
-         :class="{ quick: isQuickView || showMusicQuick || alertActive, large: isLargeView, 'has-alert': alertActive }"
+         :class="{ quick: isQuickView || showMusicQuick || alertActive, large: isLargeView, 'has-alert': alertActive, 'show-reminder': showReminderInQuick }"
          @mouseenter="onIslandEnter"
          @mouseleave="onIslandLeave"
          @click="onIslandClick"
@@ -34,19 +34,31 @@
       <template v-if="!isLargeView">
 
         <!-- 提醒态（最高优先级）：覆盖在 still/quick 之上 -->
-        <div class="alert-content" v-if="alertActive" @click.stop="dismissAlert">
+        <div class="alert-content" v-if="alertActive && !showReminderInQuick" @click.stop="dismissAlert">
           <i :class="'fa-solid ' + alertIcon"></i>
           <span class="alert-text">{{ alertText }}</span>
           <i class="fa-solid fa-xmark alert-close" v-if="alertDismissible"></i>
         </div>
 
+        <!-- 持久任务提醒（日历触发） -->
+        <div class="reminder-content" v-if="showReminderInQuick && !alertActive">
+          <div class="reminder-top">
+            <i class="fa-solid fa-clock reminder-icon"></i>
+            <span class="reminder-text">{{ activeReminderTask.text }}</span>
+            <button class="reminder-done-btn" @click.stop="completeReminderTask">
+              <i class="fa-solid fa-check"></i>
+            </button>
+          </div>
+          <div class="reminder-hint">点击展开灵动岛查看详情</div>
+        </div>
+
         <!-- Still 模式 + 无音乐：纯时间 -->
-        <div class="still-content" v-if="mode === 'still' && !showMusicQuick && !alertActive">
+        <div class="still-content" v-if="mode === 'still' && !showMusicQuick && !alertActive && !showReminderInQuick">
           <span class="still-time">{{ currentTime || '--:--' }}</span>
         </div>
 
         <!-- Quick 模式 + 无音乐：天气 + 时间/日期（占满） -->
-        <div class="quick-content" v-if="isQuickView && !showMusicQuick && !alertActive">
+        <div class="quick-content" v-if="isQuickView && !showMusicQuick && !alertActive && !showReminderInQuick">
           <div class="quick-weather" v-if="weatherTemp !== null">
             <i :class="'fa-solid ' + weatherIcon"></i>
             <span>{{ weatherTemp }}°</span>
@@ -168,6 +180,107 @@
               </div>
             </div>
           </div>
+
+          <!-- 面板4: 日历 -->
+          <div class="panel calendar-panel" :style="panelStyles.p3">
+            <div class="cal-week-nav">
+              <button class="cal-nav-btn" @click.stop="prevWeek">
+                <i class="fa-solid fa-chevron-left"></i>
+              </button>
+              <span class="cal-week-range">{{ weekRange }}</span>
+              <button class="cal-nav-btn" @click.stop="nextWeek">
+                <i class="fa-solid fa-chevron-right"></i>
+              </button>
+              <button class="cal-month-btn" @click.stop="toggleMonthPicker">
+                <i class="fa-solid fa-calendar-days"></i>
+              </button>
+            </div>
+            <div class="cal-week-header">
+              <span class="cal-day-label" v-for="d in weekDayLabels">{{ d }}</span>
+            </div>
+            <div class="cal-week-days">
+              <div class="cal-day-cell" v-for="(d, i) in weekDates"
+                   :class="{ today: d.isToday, selected: d.date === calendarSelectedDate }"
+                   @click.stop="selectDate(d.date)">
+                <span class="cal-day-num">{{ d.day }}</span>
+                <span class="cal-day-dot" v-if="d.hasTask"></span>
+              </div>
+            </div>
+            <div class="cal-day-header">
+              <i class="fa-solid fa-calendar-check"></i>
+              <span>{{ selectedDateLabel }}</span>
+            </div>
+            <div class="cal-tasks-list" ref="calTasksList">
+              <div v-if="!dayTasks.length" class="cal-tasks-empty">
+                <i class="fa-regular fa-calendar"></i>
+                <span>当天没有日程</span>
+              </div>
+              <div v-for="task in dayTasks" :key="task.id" class="cal-task-row" :class="{ done: task.done }">
+                <label class="cal-task-check" @click.stop="toggleTask(task.id)">
+                  <i :class="task.done ? 'fa-solid fa-circle-check' : 'fa-regular fa-circle'"></i>
+                </label>
+                <div class="cal-task-body">
+                  <div class="cal-task-text">{{ task.text }}</div>
+                  <div class="cal-task-time" v-if="!task.all_day">
+                    <i class="fa-regular fa-clock"></i> {{ formatTaskTime(task.due_time) }}
+                  </div>
+                  <div class="cal-task-time" v-else>
+                    <i class="fa-regular fa-calendar"></i> 全天
+                  </div>
+                </div>
+                <button class="cal-task-done-btn" @click.stop="toggleTask(task.id)">
+                  <i :class="task.done ? 'fa-solid fa-rotate-left' : 'fa-solid fa-check'"></i>
+                </button>
+                <button class="cal-task-del" @click.stop="deleteTask(task.id)">
+                  <i class="fa-solid fa-trash"></i>
+                </button>
+              </div>
+            </div>
+            <div class="cal-add">
+              <input type="text" class="cal-add-input" v-model="calendarNewTaskText"
+                     placeholder="新增日程..."
+                     @keydown.enter.stop="addCalendarTask"
+                     @click.stop />
+              <select class="cal-time-sel" v-model="calendarNewTaskHour"
+                      v-if="!calendarNewTaskAllDay" @click.stop>
+                <option v-for="h in 24" :value="String(h - 1).padStart(2, '0')">{{ String(h - 1).padStart(2, '0') }}</option>
+              </select>
+              <span class="cal-time-sep" v-if="!calendarNewTaskAllDay">:</span>
+              <select class="cal-time-sel" v-model="calendarNewTaskMinute"
+                      v-if="!calendarNewTaskAllDay" @click.stop>
+                <option v-for="m in 12" :value="String((m - 1) * 5).padStart(2, '0')">{{ String((m - 1) * 5).padStart(2, '0') }}</option>
+              </select>
+              <button class="cal-add-all-day" :class="{ active: calendarNewTaskAllDay }"
+                      @click.stop="calendarNewTaskAllDay = !calendarNewTaskAllDay"
+                      title="全天">
+                <i class="fa-regular fa-calendar"></i>
+              </button>
+              <button class="cal-add-btn" @click.stop="addCalendarTask" :disabled="!calendarNewTaskText.trim()">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
+            <div class="cal-month-picker" v-if="showMonthPicker" @click.stop>
+              <div class="cal-month-picker-nav">
+                <button class="cal-nav-btn" @click.stop="prevMonth"><i class="fa-solid fa-chevron-left"></i></button>
+                <span>{{ monthPickerLabel }}</span>
+                <button class="cal-nav-btn" @click.stop="nextMonth"><i class="fa-solid fa-chevron-right"></i></button>
+                <button class="cal-month-close" @click.stop="showMonthPicker = false">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+              <div class="cal-month-grid-header">
+                <span v-for="d in weekDayLabels">{{ d }}</span>
+              </div>
+              <div class="cal-month-grid">
+                <div class="cal-month-cell" v-for="(cell, i) in monthCalendarDays"
+                     :class="{ today: cell.isToday, selected: cell.date === calendarSelectedDate, other: cell.otherMonth }"
+                     @click.stop="jumpToDateFromMonth(cell.date)">
+                  <span class="cal-month-num">{{ cell.day }}</span>
+                  <span class="cal-month-dot" v-if="cell.hasTask"></span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 面板指示器 -->
@@ -178,6 +291,8 @@
                @click.stop="switchPanel(1)"></div>
           <div class="panel-dot" :class="{ active: activePanel === 2 }"
                @click.stop="switchPanel(2)"></div>
+          <div class="panel-dot" :class="{ active: activePanel === 3 }"
+               @click.stop="switchPanel(3)"></div>
         </div>
       </template>
     </div>

@@ -22,12 +22,20 @@ const WEATHER_ICONS = {
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
+function fmtLocalDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function todayLocalStr() {
+  return fmtLocalDate(new Date());
+}
+
 function createIslandApp() {
   return Vue.createApp({
     data() {
       return {
         mode: 'still',           // still | quick | large
-        activePanel: 0,          // 0=weather, 1=music, 2=tasks
+        activePanel: 0,          // 0=weather, 1=music, 2=tasks, 3=calendar
         isHovered: false,
         // Music state
         isPlaying: false,
@@ -67,11 +75,21 @@ function createIslandApp() {
         alertIcon: 'fa-bell',
         alertDismissible: true,
         alertTimer: null,
+        // Persistent task reminder state
+        activeReminderTask: null,
 
         // Tasks state
         tasks: [],
         newTaskText: '',
         showCompleted: false,
+        // Calendar state
+        calendarSelectedDate: '',
+        showMonthPicker: false,
+        calendarMonthOffset: 0,
+        calendarNewTaskText: '',
+        calendarNewTaskHour: '09',
+        calendarNewTaskMinute: '00',
+        calendarNewTaskAllDay: false,
         swipeStartX: 0,
         swipeStartY: 0,
         swipeMoved: false,
@@ -136,6 +154,11 @@ function createIslandApp() {
             const x = (2 - this.activePanel) * 100 + dragPct;
             const dist = Math.abs(x) / 100;
             return { transform: `translateX(${x}%)`, filter: `blur(${dist * maxBlur}px)`, opacity: 1 - dist * 0.5 };
+          })(),
+          p3: (() => {
+            const x = (3 - this.activePanel) * 100 + dragPct;
+            const dist = Math.abs(x) / 100;
+            return { transform: `translateX(${x}%)`, filter: `blur(${dist * maxBlur}px)`, opacity: 1 - dist * 0.5 };
           })()
         };
       },
@@ -147,11 +170,93 @@ function createIslandApp() {
           filter: this.albumHovered ? 'brightness(1.1)' : 'none'
         };
       },
+      // Calendar computed
+      weekDayLabels() {
+        return ['一', '二', '三', '四', '五', '六', '日'];
+      },
+      weekRange() {
+        const d = new Date(this.calendarSelectedDate + 'T00:00:00');
+        const day = d.getDay() || 7;
+        const monday = new Date(d);
+        monday.setDate(d.getDate() - day + 1);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        return `${monday.getMonth()+1}月${monday.getDate()}日 - ${sunday.getMonth()+1}月${sunday.getDate()}日`;
+      },
+      weekDates() {
+        const d = new Date(this.calendarSelectedDate + 'T00:00:00');
+        const day = d.getDay() || 7;
+        const monday = new Date(d);
+        monday.setDate(d.getDate() - day + 1);
+        const days = [];
+        for (let i = 0; i < 7; i++) {
+          const dt = new Date(monday);
+          dt.setDate(monday.getDate() + i);
+          const ds = fmtLocalDate(dt);
+          const today = todayLocalStr();
+          days.push({
+            date: ds,
+            day: dt.getDate(),
+            isToday: ds === today,
+            hasTask: this.tasks.some(t => !t.done && t.due_time && t.due_time.slice(0, 10) === ds)
+          });
+        }
+        return days;
+      },
+      selectedDateLabel() {
+        const d = new Date(this.calendarSelectedDate + 'T00:00:00');
+        return `${d.getMonth()+1}月${d.getDate()}日 周${this.weekDayLabels[d.getDay() === 0 ? 6 : d.getDay() - 1]}`;
+      },
+      dayTasks() {
+        return this.tasks
+          .filter(t => t.due_time && t.due_time.slice(0, 10) === this.calendarSelectedDate)
+          .sort((a, b) => {
+            if (a.all_day && !b.all_day) return -1;
+            if (!a.all_day && b.all_day) return 1;
+            if (a.all_day && b.all_day) return 0;
+            return (a.due_time || '').localeCompare(b.due_time || '');
+          });
+      },
+      showReminderInQuick() {
+        return this.activeReminderTask !== null && this.mode !== 'large';
+      },
+      monthPickerLabel() {
+        const now = new Date();
+        const m = new Date(now.getFullYear(), now.getMonth() + this.calendarMonthOffset, 1);
+        return `${m.getFullYear()}年${m.getMonth()+1}月`;
+      },
+      monthCalendarDays() {
+        const now = new Date();
+        const m = new Date(now.getFullYear(), now.getMonth() + this.calendarMonthOffset, 1);
+        const year = m.getFullYear();
+        const month = m.getMonth();
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startDow = firstDay.getDay() || 7;
+        const today = todayLocalStr();
+        const days = [];
+        for (let i = 1; i < startDow; i++) {
+          const pd = new Date(year, month, 1 - (startDow - i));
+          const ds = fmtLocalDate(pd);
+          days.push({ date: ds, day: pd.getDate(), otherMonth: true, isToday: ds === today, hasTask: false });
+        }
+        for (let d = 1; d <= lastDay.getDate(); d++) {
+          const ds = fmtLocalDate(new Date(year, month, d));
+          days.push({
+            date: ds, day: d, otherMonth: false, isToday: ds === today,
+            hasTask: this.tasks.some(t => !t.done && t.due_time && t.due_time.slice(0, 10) === ds)
+          });
+        }
+        return days;
+      },
     },
 
     created() {
       this.weatherCity = localStorage.getItem('island_weather_city') || '北京';
       this.loadTasks();
+      const today = new Date();
+      this.calendarSelectedDate = fmtLocalDate(today);
+      this.activeReminderTask = null;
     },
 
     mounted() {
@@ -199,24 +304,26 @@ function createIslandApp() {
         this.isHovered = true;
         this.setMouseIgnore(false);
         if (this.mode === 'large') return;
+        if (this.activeReminderTask) return;
         this.mode = 'quick';
       },
 
       onIslandLeave() {
         this.isHovered = false;
         if (this.mode === 'large') return;
+        if (this.activeReminderTask) return;
         this.mode = 'still';
         this.setMouseIgnore(true);
       },
 
       onIslandClick(e) {
-        if (e.target.closest('button') || e.target.closest('input')) return;
+        if (e.target.closest('button') || e.target.closest('input') || e.target.closest('select')) return;
         if (this.suppressClick) { this.suppressClick = false; return; }
-        if (this.mode === 'large') {
-          this.mode = 'still';
-          this.setMouseIgnore(true);
-        } else {
+        if (this.mode !== 'large') {
           this.mode = 'large';
+          if (this.activeReminderTask) {
+            this.activePanel = 3;
+          }
           this.setMouseIgnore(false);
         }
       },
@@ -226,6 +333,7 @@ function createIslandApp() {
           const island = this.$refs.island;
           if (island && !island.contains(e.target)) {
             this.mode = 'still';
+            this.showMonthPicker = false;
             this.setMouseIgnore(true);
           }
         }
@@ -241,6 +349,7 @@ function createIslandApp() {
       onContainerMouseDown(e) {
         if (this.mode === 'large' && e.target === e.currentTarget) {
           this.mode = 'still';
+          this.showMonthPicker = false;
           this.setMouseIgnore(true);
         }
       },
@@ -270,7 +379,7 @@ function createIslandApp() {
       // ===== Swipe =====
       onPointerDown(e) {
         if (this.mode !== 'large') return;
-        if (e.target.closest('button') || e.target.closest('input')) return;
+        if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.cal-day-cell') || e.target.closest('.cal-month-cell') || e.target.closest('.cal-add-all-day')) return;
         this.swipeStartX = e.clientX;
         this.swipeStartY = e.clientY;
         this.swipeMoved = false;
@@ -315,7 +424,7 @@ function createIslandApp() {
           if (Math.abs(dx) >= 40) {
             const dir = dx < 0 ? 1 : -1;
             const newPanel = this.activePanel + dir;
-            if (newPanel >= 0 && newPanel <= 2) {
+            if (newPanel >= 0 && newPanel <= 3) {
               this.activePanel = newPanel;
             }
             this.suppressClick = true;
@@ -340,13 +449,57 @@ function createIslandApp() {
 
       movePanel(dir) {
         const next = this.activePanel + dir;
-        if (next < 0 || next > 2) return;
+        if (next < 0 || next > 3) return;
         this.activePanel = next;
       },
 
       switchPanel(idx) {
-        if (idx < 0 || idx > 2) return;
+        if (idx < 0 || idx > 3) return;
         this.activePanel = idx;
+      },
+
+      // ===== Calendar =====
+      selectDate(dateStr) {
+        this.calendarSelectedDate = dateStr;
+      },
+      prevWeek() {
+        const d = new Date(this.calendarSelectedDate + 'T00:00:00');
+        d.setDate(d.getDate() - 7);
+        this.calendarSelectedDate = fmtLocalDate(d);
+      },
+      nextWeek() {
+        const d = new Date(this.calendarSelectedDate + 'T00:00:00');
+        d.setDate(d.getDate() + 7);
+        this.calendarSelectedDate = fmtLocalDate(d);
+      },
+      toggleMonthPicker() {
+        this.showMonthPicker = !this.showMonthPicker;
+      },
+      prevMonth() {
+        this.calendarMonthOffset--;
+      },
+      nextMonth() {
+        this.calendarMonthOffset++;
+      },
+      jumpToDateFromMonth(dateStr) {
+        this.calendarSelectedDate = dateStr;
+        this.showMonthPicker = false;
+        this.calendarMonthOffset = 0;
+      },
+      addCalendarTask() {
+        const text = this.calendarNewTaskText.trim();
+        if (!text) return;
+        let dueTime;
+        if (this.calendarNewTaskAllDay) {
+          dueTime = this.calendarSelectedDate + 'T00:00:00';
+        } else {
+          dueTime = this.calendarSelectedDate + 'T' + this.calendarNewTaskHour + ':' + this.calendarNewTaskMinute + ':00';
+        }
+        this.addTask(text, dueTime, null, this.calendarNewTaskAllDay, 'user');
+        this.calendarNewTaskText = '';
+        this.calendarNewTaskHour = '09';
+        this.calendarNewTaskMinute = '00';
+        this.calendarNewTaskAllDay = false;
       },
 
       // ===== Weather =====
@@ -416,10 +569,12 @@ function createIslandApp() {
           { name: 'island_weather_get_forecast', description: '查询指定城市未来几天天气预报', parameters: { type: 'object', properties: { city: { type: 'string', description: '城市名称' }, days: { type: 'integer', description: '预报天数, 默认3' } }, required: [] } },
           { name: 'island_weather_set_city', description: '设置灵动岛天气显示的城市', parameters: { type: 'object', properties: { city: { type: 'string', description: '城市名称' } }, required: ['city'] } },
           { name: 'island_get_time', description: '获取当前日期和时间信息', parameters: { type: 'object', properties: {}, required: [] } },
-          { name: 'island_task_create', description: '在灵动岛上创建一条待办事项', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容' }, due_time: { type: 'string', description: '截止时间 ISO 格式, 可选' } }, required: ['text'] } },
+          { name: 'island_task_create', description: '在灵动岛上创建一条待办事项，可关联到日历', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容' }, due_time: { type: 'string', description: '开始时间 ISO 格式, 可选' }, end_time: { type: 'string', description: '结束/过期时间 ISO 格式, 可选, 默认 due_time+1h' }, all_day: { type: 'boolean', description: '是否全天事件, 可选' } }, required: ['text'] } },
           { name: 'island_task_list', description: '列出灵动岛上所有待办事项', parameters: { type: 'object', properties: {}, required: [] } },
           { name: 'island_task_complete', description: '按文本匹配并标记完成灵动岛上的一条待办事项', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容关键词（模糊匹配）' } }, required: ['text'] } },
-          { name: 'island_task_delete', description: '按文本匹配并删除灵动岛上的一条待办事项', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容关键词（模糊匹配）' } }, required: ['text'] } }
+          { name: 'island_task_delete', description: '按文本匹配并删除灵动岛上的一条待办事项', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容关键词（模糊匹配）' } }, required: ['text'] } },
+          { name: 'island_calendar_list', description: '列出指定日期的所有待办事项', parameters: { type: 'object', properties: { date: { type: 'string', description: '日期, YYYY-MM-DD 格式, 默认今天' } }, required: [] } },
+          { name: 'island_calendar_month', description: '列出指定月份每天的任务数量', parameters: { type: 'object', properties: { year: { type: 'integer', description: '年份, 如 2025' }, month: { type: 'integer', description: '月份 1-12' } }, required: ['year', 'month'] } }
         ] } }));
       },
 
@@ -516,7 +671,7 @@ function createIslandApp() {
             return;
 
           case 'island_task_create':
-            this.addTask(tp.text, tp.due_time, 'ai');
+            this.addTask(tp.text, tp.due_time, tp.end_time, tp.all_day, 'ai');
             sendResult('已创建待办: ' + tp.text);
             return;
           case 'island_task_list':
@@ -538,6 +693,24 @@ function createIslandApp() {
             this.tasks.splice(didx, 1);
             this.saveTasks();
             sendResult('已删除: ' + dtxt);
+            return;
+          case 'island_calendar_list':
+            const listDate = (tp && tp.date) ? tp.date : todayLocalStr();
+            const dayItems = this.tasks.filter(t => t.due_time && t.due_time.slice(0, 10) === listDate);
+            if (!dayItems.length) { sendResult(`${listDate} 暂无待办事项`); return; }
+            r = dayItems.map(t => (t.done ? '✅' : '⬜') + ' ' + t.text + (t.all_day ? ' (全天)' : '') + (!t.all_day && t.due_time ? ' ' + this.formatTaskTime(t.due_time) : '')).join('\n');
+            sendResult(`${listDate} 的待办:\n` + r);
+            return;
+          case 'island_calendar_month':
+            const y = tp.year, m = tp.month;
+            const daysInMonth = new Date(y, m, 0).getDate();
+            const counts = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+              const ds = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+              const n = this.tasks.filter(t => t.due_time && t.due_time.slice(0, 10) === ds).length;
+              if (n > 0) counts.push(`${ds}: ${n}个待办`);
+            }
+            sendResult(counts.length ? `${y}年${m}月: ` + counts.join('; ') : `${y}年${m}月暂无待办`);
             return;
 
           default: sendResult('未知工具: ' + tn);
@@ -681,6 +854,17 @@ function createIslandApp() {
         this.alertActive = false;
         if (this.alertTimer) { clearTimeout(this.alertTimer); this.alertTimer = null; }
       },
+      completeReminderTask() {
+        if (!this.activeReminderTask) return;
+        const task = this.tasks.find(t => t.id === this.activeReminderTask.id);
+        if (task) { task.done = true; this.saveTasks(); }
+        this.activeReminderTask = null;
+        this.setMouseIgnore(true);
+      },
+      dismissReminderNote() {
+        this.activeReminderTask = null;
+        this.setMouseIgnore(true);
+      },
 
       // ===== Tasks =====
       loadTasks() {
@@ -689,15 +873,20 @@ function createIslandApp() {
       saveTasks() {
         localStorage.setItem('island_tasks', JSON.stringify(this.tasks));
       },
-      addTask(text, dueTime, source) {
+      addTask(text, dueTime, endTime, allDay, source) {
         if (typeof text !== 'string') text = this.newTaskText;
         const t = (text || '').trim();
         if (!t) return;
+        const dTime = dueTime || null;
+        const eTime = endTime || null;
+        const endVal = eTime || (dTime ? new Date(new Date(dTime).getTime() + 3600000).toISOString() : null);
         this.tasks.push({
           id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
           text: t,
           done: false,
-          due_time: dueTime || null,
+          due_time: dTime,
+          end_time: endVal,
+          all_day: allDay || false,
           source: source || 'user',
           notified: false,
           created_at: Date.now()
@@ -707,9 +896,18 @@ function createIslandApp() {
       },
       toggleTask(id) {
         const task = this.tasks.find(t => t.id === id);
-        if (task) { task.done = !task.done; this.saveTasks(); }
+        if (task) {
+          task.done = !task.done;
+          this.saveTasks();
+          if (task.done && this.activeReminderTask && this.activeReminderTask.id === id) {
+            this.dismissReminderNote();
+          }
+        }
       },
       deleteTask(id) {
+        if (this.activeReminderTask && this.activeReminderTask.id === id) {
+          this.dismissReminderNote();
+        }
         this.tasks = this.tasks.filter(t => t.id !== id);
         this.saveTasks();
       },
@@ -729,18 +927,22 @@ function createIslandApp() {
         for (const task of this.tasks) {
           if (task.done || task.notified || !task.due_time) continue;
           const due = new Date(task.due_time).getTime();
-          if (isNaN(due)) {
-            const m = /(\d{1,2}):(\d{2})/.exec(task.due_time);
-            if (!m) continue;
-            const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-            const dueMin = parseInt(m[1]) * 60 + parseInt(m[2]);
-            if (nowMin < dueMin) continue;
-          } else if (now < due) {
+          if (isNaN(due)) continue;
+          const endTime = task.end_time ? new Date(task.end_time).getTime() : due + 3600000;
+          if (now < due) continue;
+          if (now >= endTime) {
+            task.notified = true;
+            if (this.activeReminderTask && this.activeReminderTask.id === task.id) {
+              this.activeReminderTask = null;
+            }
             continue;
           }
           task.notified = true;
           triggered = true;
-          this.showAlert({ icon: 'fa-clock', text: '⏰ ' + task.text, dismissible: true, duration: 6000 });
+          this.activeReminderTask = task;
+          if (this.mode === 'still') {
+            this.setMouseIgnore(false);
+          }
         }
         if (triggered) this.saveTasks();
       }
