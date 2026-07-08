@@ -131,6 +131,7 @@ function createIslandApp() {
       // ===== Mouse Events =====
       onIslandEnter() {
         this.isHovered = true;
+        this.setMouseIgnore(false);
         if (this.mode === 'large') return;
         this.mode = 'quick';
       },
@@ -139,6 +140,7 @@ function createIslandApp() {
         this.isHovered = false;
         if (this.mode === 'large') return;
         this.mode = 'still';
+        this.setMouseIgnore(true);
       },
 
       onIslandClick(e) {
