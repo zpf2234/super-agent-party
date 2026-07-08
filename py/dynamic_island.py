@@ -8,6 +8,7 @@ from typing import Dict, List
 
 
 _island_enabled = False
+_macos_active_player = None  # "Spotify" or "Music"
 
 ISLAND_TOOLS_SCHEMA = [
     {
@@ -49,6 +50,45 @@ ISLAND_TOOLS_SCHEMA = [
                 }
             },
             "required": ["level"]
+        }
+    },
+    {
+        "name": "island_task_create",
+        "description": "在灵动岛上创建一条待办事项，可指定截止时间",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "待办内容"},
+                "due_time": {"type": "string", "description": "截止时间 ISO 格式或 HH:MM 格式, 可选"}
+            },
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "island_task_list",
+        "description": "列出灵动岛上所有待办事项",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "island_task_complete",
+        "description": "按文本关键词匹配并标记完成灵动岛上的一条待办事项",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "待办内容关键词（模糊匹配）"}
+            },
+            "required": ["text"]
+        }
+    },
+    {
+        "name": "island_task_delete",
+        "description": "按文本关键词匹配并删除灵动岛上的一条待办事项",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "待办内容关键词（模糊匹配）"}
+            },
+            "required": ["text"]
         }
     },
 ]
@@ -151,46 +191,94 @@ def _media_key(key_name: str):
         import pyautogui
         pyautogui.FAILSAFE = False
         pyautogui.press(key_name)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[DynamicIsland] pyautogui press {key_name} failed: {e}")
+
+
+def _macos_media_command(command: str, player: str = ""):
+    import subprocess
+
+    if not player:
+        player = _macos_active_player
+
+    command_map = {
+        "play": {"Spotify": "play", "Music": "play"},
+        "pause": {"Spotify": "pause", "Music": "pause"},
+        "next_track": {"Spotify": "next track", "Music": "next track"},
+        "previous_track": {"Spotify": "previous track", "Music": "previous track"},
+    }
+
+    try:
+        targets = [player] if player else ["Spotify", "Music"]
+        for app in targets:
+            cmd = command_map.get(command, {}).get(app, "")
+            if not cmd:
+                continue
+            script = f'tell application "{app}" to {cmd}'
+            try:
+                subprocess.run(
+                    ["osascript", "-e", script],
+                    capture_output=True, timeout=5
+                )
+                print(f"[DynamicIsland] AppleScript sent to {app}: {cmd}")
+            except Exception as e:
+                print(f"[DynamicIsland] AppleScript {app} {cmd} failed: {e}")
+    except Exception as e:
+        print(f"[DynamicIsland] _macos_media_command error: {e}")
 
 
 def island_music_play():
     import platform
-    if platform.system() == "Linux":
+    system = platform.system()
+    if system == "Linux":
         if _mpris_call('PlayPause'):
             return "已发送播放指令。"
         return "未检测到 MPRIS 播放器。"
+    if system == "Darwin":
+        _macos_media_command("play")
+        return "已发送播放指令。"
     _media_key('playpause')
     return "已发送播放指令。"
 
 
 def island_music_pause():
     import platform
-    if platform.system() == "Linux":
+    system = platform.system()
+    if system == "Linux":
         if _mpris_call('PlayPause'):
             return "已发送暂停指令。"
         return "未检测到 MPRIS 播放器。"
+    if system == "Darwin":
+        _macos_media_command("pause")
+        return "已发送暂停指令。"
     _media_key('playpause')
     return "已发送暂停指令。"
 
 
 def island_music_next():
     import platform
-    if platform.system() == "Linux":
+    system = platform.system()
+    if system == "Linux":
         if _mpris_call('Next'):
             return "已切换到下一首。"
         return "未检测到 MPRIS 播放器。"
+    if system == "Darwin":
+        _macos_media_command("next_track")
+        return "已切换到下一首。"
     _media_key('nexttrack')
     return "已切换到下一首。"
 
 
 def island_music_prev():
     import platform
-    if platform.system() == "Linux":
+    system = platform.system()
+    if system == "Linux":
         if _mpris_call('Previous'):
             return "已切换到上一首。"
         return "未检测到 MPRIS 播放器。"
+    if system == "Darwin":
+        _macos_media_command("previous_track")
+        return "已切换到上一首。"
     _media_key('prevtrack')
     return "已切换到上一首。"
 
@@ -216,8 +304,8 @@ def island_music_set_volume(level: int):
                 capture_output=True, timeout=3
             )
             return f"音量已设置为 {level}%"
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[DynamicIsland] macOS volume error: {e}")
 
     # Linux: 使用 pactl 直接设定
     if system == "Linux":
@@ -227,8 +315,8 @@ def island_music_set_volume(level: int):
                 capture_output=True, timeout=3
             )
             return f"音量已设置为 {level}%"
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[DynamicIsland] Linux volume error: {e}")
 
     # Windows: 使用 pycaw 直接设定
     if system == "Windows":
@@ -318,8 +406,8 @@ def _query_smtc_windows():
                     if end > 0:
                         pos = tl.position.total_seconds()
                         timeline_ok = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[DynamicIsland] SMTC timeline query error: {e}")
                 all_sessions.append({
                     "title": info.title or "",
                     "artist": info.artist or "",
@@ -328,7 +416,8 @@ def _query_smtc_windows():
                     "position": pos,
                     "timelineSupported": timeline_ok,
                 })
-            except Exception:
+            except Exception as e:
+                print(f"[DynamicIsland] SMTC session query error: {e}")
                 pass
         if not all_sessions:
             return None
@@ -403,52 +492,63 @@ async def poll_music_state():
 
     elif platform.system() == "Darwin":
         import subprocess, asyncio
-        def _query_macos():
-            script = '''
-set output to ""
+
+        def _query_app(app_name):
+            script = f'''
 tell application "System Events"
-    set spotifyRunning to (name of every process) contains "Spotify"
-    set musicRunning to (name of every process) contains "Music"
+    set isRunning to (name of every process) contains "{app_name}"
 end tell
-if spotifyRunning then
+if isRunning then
     try
-        tell application "Spotify"
+        tell application "{app_name}"
             set s to player state as string
             set n to name of current track
             set a to artist of current track
-            set output to "Spotify||" & s & "||" & n & "||" & a
-        end tell
-    end try
-else if musicRunning then
-    try
-        tell application "Music"
-            set s to player state as string
-            set n to name of current track
-            set a to artist of current track
-            set output to "Music||" & s & "||" & n & "||" & a
+            return s & "||" & n & "||" & a
         end tell
     end try
 end if
-return output
+return ""
 '''
             try:
-                rc = subprocess.run(["osascript", "-e", script],
-                                    capture_output=True, text=True, timeout=6)
+                rc = subprocess.run(
+                    ["osascript", "-e", script],
+                    capture_output=True, text=True, timeout=4
+                )
                 out = rc.stdout.strip()
                 if out and "||" in out:
-                    parts = out.split("||", 3)
-                    source = parts[0]
-                    state = parts[1].lower() if len(parts) > 1 else ""
-                    track = parts[2] if len(parts) > 2 else ""
-                    artist = parts[3] if len(parts) > 3 else ""
+                    parts = out.split("||", 2)
                     return {
-                        "track": track,
-                        "artist": artist,
-                        "isPlaying": state == "playing",
-                        "sourceAppId": source
+                        "source": app_name,
+                        "state": parts[0].lower() if len(parts) > 0 else "",
+                        "track": parts[1] if len(parts) > 1 else "",
+                        "artist": parts[2] if len(parts) > 2 else ""
                     }
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[DynamicIsland] _query_app {app_name} error: {e}")
+            return None
+
+        def _query_macos():
+            global _macos_active_player
+            spotify_data = _query_app("Spotify")
+            music_data = _query_app("Music")
+
+            all_data = [d for d in [spotify_data, music_data] if d is not None]
+            if not all_data:
+                return None
+
+            preferred = next((d for d in all_data if d["state"] == "playing"), None)
+            if not preferred:
+                preferred = next((d for d in all_data if d["track"].strip()), None)
+
+            if preferred:
+                _macos_active_player = preferred["source"]
+                return {
+                    "track": preferred["track"],
+                    "artist": preferred["artist"],
+                    "isPlaying": preferred["state"] == "playing",
+                    "sourceAppId": preferred["source"]
+                }
             return None
 
         mac_data = await asyncio.to_thread(_query_macos)

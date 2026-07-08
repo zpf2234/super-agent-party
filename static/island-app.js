@@ -27,17 +27,22 @@ function createIslandApp() {
     data() {
       return {
         mode: 'still',           // still | quick | large
-        activePanel: 0,          // 0=weather, 1=music
+        activePanel: 0,          // 0=weather, 1=music, 2=tasks
         isHovered: false,
         // Music state
         isPlaying: false,
         hasMusic: false,
         currentTrack: '',
         currentArtist: '',
+        currentSourceApp: '',
         lastPlayAction: 0,
         musicMissCount: 0,
         volume: 50,
         marqueeAnim: null,
+
+        // Album 3D tilt
+        albumRotation: { x: 0, y: 0 },
+        albumHovered: false,
 
         // Weather state
         weatherTemp: null,
@@ -56,7 +61,17 @@ function createIslandApp() {
         musicPollTimer: null,
         weatherTimer: null,
 
-        // Swipe
+        // Alert state (for task due / AI reply notifications)
+        alertActive: false,
+        alertText: '',
+        alertIcon: 'fa-bell',
+        alertDismissible: true,
+        alertTimer: null,
+
+        // Tasks state
+        tasks: [],
+        newTaskText: '',
+        showCompleted: false,
         swipeStartX: 0,
         swipeStartY: 0,
         swipeMoved: false,
@@ -91,20 +106,52 @@ function createIslandApp() {
       playIcon() {
         return this.isPlaying ? 'fa-pause' : 'fa-play';
       },
+      pendingTaskCount() {
+        return this.tasks.filter(t => !t.done).length;
+      },
+      completedCount() {
+        return this.tasks.filter(t => t.done).length;
+      },
+      sortedTasks() {
+        const active = this.tasks.filter(t => !t.done);
+        const completed = this.tasks.filter(t => t.done);
+        return this.showCompleted ? [...active, ...completed] : active;
+      },
       // Reactive panel transforms — triggers Vue re-render on dragOffset change
-      panelTransforms() {
-        const p0Base = -this.activePanel * 100;
-        const p1Base = (1 - this.activePanel) * 100;
+      panelStyles() {
         const dragPct = this.isDragging ? (this.dragOffset / (this._panelWidth || 420) * 100) : 0;
+        const maxBlur = 10;
         return {
-          p0: `translateX(${p0Base + dragPct}%)`,
-          p1: `translateX(${p1Base + dragPct}%)`
+          p0: (() => {
+            const x = (0 - this.activePanel) * 100 + dragPct;
+            const dist = Math.abs(x) / 100;
+            return { transform: `translateX(${x}%)`, filter: `blur(${dist * maxBlur}px)`, opacity: 1 - dist * 0.5 };
+          })(),
+          p1: (() => {
+            const x = (1 - this.activePanel) * 100 + dragPct;
+            const dist = Math.abs(x) / 100;
+            return { transform: `translateX(${x}%)`, filter: `blur(${dist * maxBlur}px)`, opacity: 1 - dist * 0.5 };
+          })(),
+          p2: (() => {
+            const x = (2 - this.activePanel) * 100 + dragPct;
+            const dist = Math.abs(x) / 100;
+            return { transform: `translateX(${x}%)`, filter: `blur(${dist * maxBlur}px)`, opacity: 1 - dist * 0.5 };
+          })()
+        };
+      },
+      albumStyle() {
+        return {
+          transform: `rotateX(${this.albumRotation.x}deg) rotateY(${this.albumRotation.y}deg) scale(${this.albumHovered ? 1.25 : 1})`,
+          transformStyle: 'preserve-3d',
+          transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s ease-out',
+          filter: this.albumHovered ? 'brightness(1.1)' : 'none'
         };
       },
     },
 
     created() {
       this.weatherCity = localStorage.getItem('island_weather_city') || '北京';
+      this.loadTasks();
     },
 
     mounted() {
@@ -122,6 +169,10 @@ function createIslandApp() {
       // Start weather polling
       this.fetchWeather();
       this.weatherTimer = setInterval(this.fetchWeather, 600000);
+
+      // Start task reminder checker
+      this.taskReminderTimer = setInterval(this.checkTaskReminders, 30000);
+      this.checkTaskReminders();
     },
 
     beforeUnmount() {
@@ -132,6 +183,7 @@ function createIslandApp() {
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
       if (this.timeTimer) clearInterval(this.timeTimer);
       if (this.weatherTimer) clearInterval(this.weatherTimer);
+      if (this.taskReminderTimer) clearInterval(this.taskReminderTimer);
     },
 
     methods: {
@@ -193,6 +245,22 @@ function createIslandApp() {
         }
       },
 
+      // ===== Album 3D Tilt =====
+      onAlbumMouseMove(e) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const deltaX = e.clientX - centerX;
+        const deltaY = e.clientY - centerY;
+        const maxDistance = Math.sqrt(rect.width * rect.width + rect.height * rect.height) / 2;
+        this.albumRotation.x = (deltaY / maxDistance) * 35;
+        this.albumRotation.y = (deltaX / maxDistance) * -35;
+      },
+      onAlbumMouseLeave() {
+        this.albumRotation = { x: 0, y: 0 };
+        this.albumHovered = false;
+      },
+
       setMouseIgnore(ignore) {
         if (window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
           window.electronAPI.setIgnoreMouseEvents(ignore, { forward: true });
@@ -247,7 +315,7 @@ function createIslandApp() {
           if (Math.abs(dx) >= 40) {
             const dir = dx < 0 ? 1 : -1;
             const newPanel = this.activePanel + dir;
-            if (newPanel >= 0 && newPanel <= 1) {
+            if (newPanel >= 0 && newPanel <= 2) {
               this.activePanel = newPanel;
             }
             this.suppressClick = true;
@@ -272,12 +340,12 @@ function createIslandApp() {
 
       movePanel(dir) {
         const next = this.activePanel + dir;
-        if (next < 0 || next > 1) return;
+        if (next < 0 || next > 2) return;
         this.activePanel = next;
       },
 
       switchPanel(idx) {
-        if (idx < 0 || idx > 1) return;
+        if (idx < 0 || idx > 2) return;
         this.activePanel = idx;
       },
 
@@ -324,6 +392,8 @@ function createIslandApp() {
             const d = JSON.parse(e.data);
             if (d.type === 'call_mcp_tool') this.handleMcpCall(d.data);
             if (d.type === 'island_music_state') this.handleMusicState(d.data);
+            if (d.type === 'island_ai_reply_done') this.showAlert({ icon: 'fa-comment-dots', text: d.data?.text || 'AI 已回复', dismissible: true, duration: 5000 });
+            if (d.type === 'island_notification') this.showAlert({ icon: d.data?.icon || 'fa-bell', text: d.data?.text || '', dismissible: true, duration: 5000 });
           } catch (err) {}
         };
         this.ws.onclose = () => {
@@ -345,7 +415,11 @@ function createIslandApp() {
           { name: 'island_weather_get_current', description: '查询指定城市或当前配置城市的实时天气', parameters: { type: 'object', properties: { city: { type: 'string', description: '城市名称' } }, required: [] } },
           { name: 'island_weather_get_forecast', description: '查询指定城市未来几天天气预报', parameters: { type: 'object', properties: { city: { type: 'string', description: '城市名称' }, days: { type: 'integer', description: '预报天数, 默认3' } }, required: [] } },
           { name: 'island_weather_set_city', description: '设置灵动岛天气显示的城市', parameters: { type: 'object', properties: { city: { type: 'string', description: '城市名称' } }, required: ['city'] } },
-          { name: 'island_get_time', description: '获取当前日期和时间信息', parameters: { type: 'object', properties: {}, required: [] } }
+          { name: 'island_get_time', description: '获取当前日期和时间信息', parameters: { type: 'object', properties: {}, required: [] } },
+          { name: 'island_task_create', description: '在灵动岛上创建一条待办事项', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容' }, due_time: { type: 'string', description: '截止时间 ISO 格式, 可选' } }, required: ['text'] } },
+          { name: 'island_task_list', description: '列出灵动岛上所有待办事项', parameters: { type: 'object', properties: {}, required: [] } },
+          { name: 'island_task_complete', description: '按文本匹配并标记完成灵动岛上的一条待办事项', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容关键词（模糊匹配）' } }, required: ['text'] } },
+          { name: 'island_task_delete', description: '按文本匹配并删除灵动岛上的一条待办事项', parameters: { type: 'object', properties: { text: { type: 'string', description: '待办内容关键词（模糊匹配）' } }, required: ['text'] } }
         ] } }));
       },
 
@@ -372,6 +446,7 @@ function createIslandApp() {
             this.currentTrack = t;
             this.currentArtist = a;
           }
+          this.currentSourceApp = data.sourceAppId || '';
           this.hasMusic = true;
           if (Date.now() - this.lastPlayAction > 2000) {
             this.isPlaying = data.isPlaying === true;
@@ -384,6 +459,7 @@ function createIslandApp() {
               this.hasMusic = false;
               this.currentTrack = '';
               this.currentArtist = '';
+              this.currentSourceApp = '';
               this.isPlaying = false;
               this.stopMarquee();
             }
@@ -404,8 +480,8 @@ function createIslandApp() {
         switch (tn) {
           case 'island_music_play': this.sendMusicControl('play'); this.lastPlayAction = Date.now(); this.isPlaying = true; sendResult('已播放'); break;
           case 'island_music_pause': this.sendMusicControl('pause'); this.lastPlayAction = Date.now(); this.isPlaying = false; sendResult('已暂停'); break;
-          case 'island_music_next': this.sendMusicControl('next'); sendResult('已切下一首'); break;
-          case 'island_music_prev': this.sendMusicControl('prev'); sendResult('已切上一首'); break;
+          case 'island_music_next': this.sendMusicControl('next'); sendResult('已切下一首'); setTimeout(() => this.requestMusicState(), 400); setTimeout(() => this.requestMusicState(), 1200); break;
+          case 'island_music_prev': this.sendMusicControl('prev'); sendResult('已切上一首'); setTimeout(() => this.requestMusicState(), 400); setTimeout(() => this.requestMusicState(), 1200); break;
           case 'island_music_get_info': r = this.currentTrack ? (this.currentTrack + (this.currentArtist ? ' - ' + this.currentArtist : '')) : '未检测到播放信息'; sendResult(r); break;
           case 'island_music_set_volume':
             const l = (tp && tp.level != null) ? Math.max(0, Math.min(100, parseInt(tp.level))) : 50;
@@ -437,6 +513,31 @@ function createIslandApp() {
             const now = new Date();
             const t = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')} 星期${WEEKDAYS[now.getDay()]}`;
             sendResult(t);
+            return;
+
+          case 'island_task_create':
+            this.addTask(tp.text, tp.due_time, 'ai');
+            sendResult('已创建待办: ' + tp.text);
+            return;
+          case 'island_task_list':
+            if (!this.tasks.length) { sendResult('暂无待办事项'); return; }
+            r = this.tasks.map(t => (t.done ? '✅' : '⬜') + ' ' + t.text + (t.due_time ? ' (到期: ' + this.formatTaskTime(t.due_time) + ')' : '')).join('\n');
+            sendResult(r);
+            return;
+          case 'island_task_complete':
+            const ctask = this.tasks.find(t => t.text.includes(tp.text));
+            if (!ctask) { sendResult('未找到匹配的待办: ' + tp.text); return; }
+            ctask.done = !ctask.done;
+            this.saveTasks();
+            sendResult((ctask.done ? '已完成' : '已恢复') + ': ' + ctask.text);
+            return;
+          case 'island_task_delete':
+            const didx = this.tasks.findIndex(t => t.text.includes(tp.text));
+            if (didx === -1) { sendResult('未找到匹配的待办: ' + tp.text); return; }
+            const dtxt = this.tasks[didx].text;
+            this.tasks.splice(didx, 1);
+            this.saveTasks();
+            sendResult('已删除: ' + dtxt);
             return;
 
           default: sendResult('未知工具: ' + tn);
@@ -492,6 +593,12 @@ function createIslandApp() {
           this.isPlaying = true;
         }
         this.lastPlayAction = Date.now();
+      },
+
+      skipTrack(dir) {
+        this.sendMusicControl(dir > 0 ? 'next' : 'prev');
+        setTimeout(() => this.requestMusicState(), 400);
+        setTimeout(() => this.requestMusicState(), 1200);
       },
 
       // ===== Marquee =====
@@ -559,6 +666,83 @@ function createIslandApp() {
         if (window.electronAPI && window.electronAPI.closeIslandWindow) {
           window.electronAPI.closeIslandWindow();
         }
+      },
+
+      // ===== Alert =====
+      showAlert({ icon = 'fa-bell', text = '', dismissible = true, duration = 5000 }) {
+        this.alertIcon = icon;
+        this.alertText = text;
+        this.alertDismissible = dismissible;
+        this.alertActive = true;
+        if (this.alertTimer) clearTimeout(this.alertTimer);
+        if (duration > 0) this.alertTimer = setTimeout(() => this.dismissAlert(), duration);
+      },
+      dismissAlert() {
+        this.alertActive = false;
+        if (this.alertTimer) { clearTimeout(this.alertTimer); this.alertTimer = null; }
+      },
+
+      // ===== Tasks =====
+      loadTasks() {
+        try { this.tasks = JSON.parse(localStorage.getItem('island_tasks') || '[]'); } catch (e) { this.tasks = []; }
+      },
+      saveTasks() {
+        localStorage.setItem('island_tasks', JSON.stringify(this.tasks));
+      },
+      addTask(text, dueTime, source) {
+        if (typeof text !== 'string') text = this.newTaskText;
+        const t = (text || '').trim();
+        if (!t) return;
+        this.tasks.push({
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+          text: t,
+          done: false,
+          due_time: dueTime || null,
+          source: source || 'user',
+          notified: false,
+          created_at: Date.now()
+        });
+        this.newTaskText = '';
+        this.saveTasks();
+      },
+      toggleTask(id) {
+        const task = this.tasks.find(t => t.id === id);
+        if (task) { task.done = !task.done; this.saveTasks(); }
+      },
+      deleteTask(id) {
+        this.tasks = this.tasks.filter(t => t.id !== id);
+        this.saveTasks();
+      },
+      formatTaskTime(isoStr) {
+        if (!isoStr) return '';
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) {
+          const m = /(\d{1,2}):(\d{2})/.exec(isoStr);
+          if (m) return m[1] + ':' + m[2];
+          return isoStr;
+        }
+        return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      },
+      checkTaskReminders() {
+        const now = Date.now();
+        let triggered = false;
+        for (const task of this.tasks) {
+          if (task.done || task.notified || !task.due_time) continue;
+          const due = new Date(task.due_time).getTime();
+          if (isNaN(due)) {
+            const m = /(\d{1,2}):(\d{2})/.exec(task.due_time);
+            if (!m) continue;
+            const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+            const dueMin = parseInt(m[1]) * 60 + parseInt(m[2]);
+            if (nowMin < dueMin) continue;
+          } else if (now < due) {
+            continue;
+          }
+          task.notified = true;
+          triggered = true;
+          this.showAlert({ icon: 'fa-clock', text: '⏰ ' + task.text, dismissible: true, duration: 6000 });
+        }
+        if (triggered) this.saveTasks();
       }
     },
 

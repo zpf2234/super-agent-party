@@ -5639,6 +5639,14 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             )
                 logger.info(f"all msg: {request.messages}")
                 yield "data: [DONE]\n\n"
+                if not request.is_sub_agent:
+                    try:
+                        await ws_manager.broadcast({
+                            "type": "island_ai_reply_done",
+                            "data": {"text": "智能体生成完毕！"}
+                        })
+                    except Exception:
+                        pass
                 if settings.get('loveSettings', {}).get('enabled', False) and not request.is_sub_agent:
                     try:
                         from py.affection_system import extract_and_update_affection
