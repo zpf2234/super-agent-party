@@ -16958,6 +16958,33 @@ function updateElement(el, rawMarkdown, formatFn) {
                                 </el-input>
                               </el-form-item>
 
+                              <el-form-item :label="t('minimalModeUrl') || '极简模式 URL'" class="form-item-align" label-position="top">
+                                <el-input
+                                  :value="partyURL+'/minimal.html'"
+                                  readonly
+                                  class="full-width-input"
+                                >
+                                  <template #append>
+                                    <el-button @click="copyMinimalEndpoint" class="copy-btn">
+                                      <i class="fa-solid fa-copy"></i>
+                                    </el-button>
+                                  </template>
+                                </el-input>
+                              </el-form-item>
+                              <el-form-item :label="t('islandUrl') || '灵动岛 URL'" class="form-item-align" label-position="top">
+                                <el-input
+                                  :value="partyURL+'/island.html'"
+                                  readonly
+                                  class="full-width-input"
+                                >
+                                  <template #append>
+                                    <el-button @click="copyIslandEndpoint" class="copy-btn">
+                                      <i class="fa-solid fa-copy"></i>
+                                    </el-button>
+                                  </template>
+                                </el-input>
+                              </el-form-item>
+
                             </div>
                           </div>
                         </el-form>

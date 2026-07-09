@@ -834,7 +834,7 @@ function createIslandApp() {
       // ===== Swipe =====
       onPointerDown(e) {
         if (this.mode !== 'large') return;
-        if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.cal-day-cell') || e.target.closest('.cal-month-cell') || e.target.closest('.cal-add-all-day') || e.target.closest('.pomo-quick')) return;
+        if (e.target.closest('button') || e.target.closest('input') || e.target.closest('textarea') || e.target.closest('select') || e.target.closest('.cal-day-cell') || e.target.closest('.cal-month-cell') || e.target.closest('.cal-add-all-day') || e.target.closest('.pomo-quick')) return;
         this.swipeStartX = e.clientX;
         this.swipeStartY = e.clientY;
         this.swipeMoved = false;

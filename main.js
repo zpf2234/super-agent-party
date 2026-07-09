@@ -1673,6 +1673,10 @@ app.whenReady().then(async () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('minimal-window-closed');
         }
+        // 通知灵动岛极简模式已关闭
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.webContents.send('minimal-window-closed');
+        }
       });
 
       return true;
