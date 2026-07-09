@@ -11236,7 +11236,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           <el-link
                             type="primary"
                             :underline="false"
-                            href="https://api.you.com"
+                            href="https://you.com/platform"
                             target="_blank"
                           >
                             <el-icon class="mr-1">
@@ -11247,6 +11247,15 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </div>
                     </div>
                     <div class="tool-content">
+                      <el-form-item :label="t('youcomTier')" class="form-item-align">
+                        <el-radio-group v-model="webSearchSettings.youcom_tier" @change="autoSaveSettings">
+                          <el-radio value="free">{{ t('youcomTierFree') }}</el-radio>
+                          <el-radio value="api_key">{{ t('youcomTierApiKey') }}</el-radio>
+                        </el-radio-group>
+                      </el-form-item>
+                      <div v-if="webSearchSettings.youcom_tier === 'free'" style="padding: 8px 12px; background: var(--el-color-info-light-9); border-radius: 6px; font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 12px;">
+                        <i class="fa-solid fa-circle-info"></i> {{ t('youcomTierFreeNotice') }}
+                      </div>
                       <el-form-item :label="t('resultCount')" class="form-item-align">
                         <el-slider
                           v-model="webSearchSettings.youcom_max_results"
@@ -11257,7 +11266,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                           @input="autoSaveSettings"
                         />
                       </el-form-item>
-                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                      <el-form-item :label="t('apiKey')" class="form-item-align" v-if="webSearchSettings.youcom_tier === 'api_key'">
                         <el-input
                           v-model="webSearchSettings.youcom_api_key"
                           :placeholder="t('apiKeyPlaceholder')"
