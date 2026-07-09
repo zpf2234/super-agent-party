@@ -1,22 +1,22 @@
 /* OpenRunde 字体 */
 @font-face {
   font-family: 'OpenRunde';
-  src: url('../OpenRunde-Regular.woff') format('woff');
+  src: url('../source/fonts/OpenRunde-Regular.woff') format('woff');
   font-weight: 400; font-style: normal;
 }
 @font-face {
   font-family: 'OpenRunde';
-  src: url('../OpenRunde-Medium.woff') format('woff');
+  src: url('../source/fonts/OpenRunde-Medium.woff') format('woff');
   font-weight: 500; font-style: normal;
 }
 @font-face {
   font-family: 'OpenRunde';
-  src: url('../OpenRunde-Semibold.woff') format('woff');
+  src: url('../source/fonts/OpenRunde-Semibold.woff') format('woff');
   font-weight: 600; font-style: normal;
 }
 @font-face {
   font-family: 'OpenRunde';
-  src: url('../OpenRunde-Bold.woff') format('woff');
+  src: url('../source/fonts/OpenRunde-Bold.woff') format('woff');
   font-weight: 700; font-style: normal;
 }
 
