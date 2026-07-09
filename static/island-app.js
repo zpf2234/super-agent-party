@@ -653,6 +653,7 @@ function createIslandApp() {
       this.loadTasks();
       try { this.pomodoro.sessions = JSON.parse(localStorage.getItem('island_pomodoro') || '[]'); } catch (e) { this.pomodoro.sessions = []; }
       try { this.clipboardHistory = JSON.parse(localStorage.getItem('island_clipboard') || '[]'); } catch (e) { this.clipboardHistory = []; }
+      this.clipboardHistory = this.clipboardHistory.filter(h => h && typeof h.text === 'string');
       this.clipboardHistory.forEach(h => { if (!h.type) h.type = this.detectContentType(h.text || ''); });
       try { this.clipboardPinned = JSON.parse(localStorage.getItem('island_clipboard_pinned') || '[]'); } catch (e) { this.clipboardPinned = []; }
       this.targetLangActual = navigator.language || navigator.userLanguage || 'zh-CN';
@@ -788,11 +789,19 @@ function createIslandApp() {
       onDocMouseDown(e) {
         if (this.mode === 'large') {
           const island = this.$refs.island;
-          if (island && !island.contains(e.target)) {
+          if (!island || !island.contains(e.target)) {
             this.mode = 'still';
             this.showMonthPicker = false;
             this.setMouseIgnore(true);
           }
+        }
+      },
+
+      onShieldMouseDown(e) {
+        if (this.mode === 'large') {
+          this.mode = 'still';
+          this.showMonthPicker = false;
+          this.setMouseIgnore(true);
         }
       },
 

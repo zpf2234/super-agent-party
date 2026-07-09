@@ -20,6 +20,15 @@
   font-weight: 700; font-style: normal;
 }
 
+/* 大型模式点击关闭层 */
+.large-dismiss-shield {
+  position: fixed; top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 2147483646;
+  pointer-events: auto;
+  background: transparent;
+}
+
 /* 全屏容器 */
 #island-container {
   position: fixed; top: 0; left: 0;

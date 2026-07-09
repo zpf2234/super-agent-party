@@ -1732,6 +1732,25 @@ app.whenReady().then(async () => {
 
       remoteMain.enable(dynamicIslandWindow.webContents);
 
+      dynamicIslandWindow.webContents.on('render-process-gone', (event, details) => {
+        console.error('[Island] Render process gone:', details.reason, details.exitCode);
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.close();
+          dynamicIslandWindow = null;
+        }
+      });
+
+      dynamicIslandWindow.on('unresponsive', () => {
+        console.warn('[Island] Renderer unresponsive, restoring mouse forwarding');
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          if (isLinux) {
+            dynamicIslandWindow.setIgnoreMouseEvents(true);
+          } else {
+            dynamicIslandWindow.setIgnoreMouseEvents(true, { forward: true });
+          }
+        }
+      });
+
       if (isLinux) {
         dynamicIslandWindow.setIgnoreMouseEvents(true);
       } else {

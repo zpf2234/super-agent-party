@@ -18,6 +18,7 @@
   </style>
 </head>
 <body>
+  <div class="large-dismiss-shield" v-if="isLargeView" @mousedown="onShieldMouseDown"></div>
   <div id="island-container">
     <div id="island"
          ref="island"
@@ -468,7 +469,7 @@
                   <i :class="typeIcon(item.type)"></i>
                 </div>
                 <div class="clip-content" @click.stop="copyToClipboard(item.text)">
-                  <div class="clip-text">{{ item.text.substring(0, 80) }}{{ item.text.length > 80 ? '...' : '' }}</div>
+                  <div class="clip-text">{{ (item.text || '').substring(0, 80) }}{{ (item.text || '').length > 80 ? '...' : '' }}</div>
                   <div class="clip-meta">
                     <span class="clip-time">{{ formatClipboardTime(item.time) }}</span>
                     <span class="clip-source" v-if="item.source === 'ai'">AI</span>
