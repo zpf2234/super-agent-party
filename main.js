@@ -458,9 +458,24 @@ async function getStartPortForAccount(accountData) {
   // 获取其他账户占用的端口
   const usedPorts = getUsedPortsByOtherAccounts();
   
-  // 如果该账户有 lastPort，优先尝试
+  // 主账户(root)始终优先使用 DEFAULT_PORT (3456)，不使用 lastPort
+  if (accountData.type === 'root') {
+    const available = await isPortAvailable(DEFAULT_PORT);
+    if (available) {
+      return DEFAULT_PORT;
+    }
+    let port = DEFAULT_PORT + 1;
+    while (usedPorts.includes(port) || !(await isPortAvailable(port))) {
+      port++;
+      if (port > DEFAULT_PORT + 20000) {
+        throw new Error('无法找到可用端口');
+      }
+    }
+    return port;
+  }
+  
+  // user 账户：优先使用 lastPort
   if (accountData.lastPort) {
-    // 检查 lastPort 是否被其他账户占用
     if (!usedPorts.includes(accountData.lastPort)) {
       const available = await isPortAvailable(accountData.lastPort);
       if (available) {
@@ -1175,11 +1190,11 @@ app.whenReady().then(async () => {
     if (global.vmcCfg.receive.enable) startVMCReceiver(global.vmcCfg);
     // 启动后端服务（传递账户端口和数据目录）
     await startBackend(startPort, currentAccountDataPath)
-    // 更新账户的 lastPort
+    // 更新账户的 lastPort（主账户不保存，始终使用默认端口3456）
     if (currentAccountId && PORT) {
       const registry = loadAccounts();
       const idx = registry.accounts.findIndex(a => a.id === currentAccountId);
-      if (idx >= 0) {
+      if (idx >= 0 && registry.accounts[idx].type !== 'root') {
         registry.accounts[idx].lastPort = PORT;
         saveAccounts(registry);
         console.log(`[Accounts] 更新账户端口: ${currentAccountId} -> ${PORT}`);
