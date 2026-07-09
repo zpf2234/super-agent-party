@@ -84,6 +84,7 @@
           <div class="quick-weather" v-if="weatherTemp !== null">
             <i :class="'fa-solid ' + weatherIcon"></i>
             <span>{{ weatherTemp }}°</span>
+            <span class="quick-weather-city">{{ weatherCity }}</span>
           </div>
           <span class="quick-time" style="border:none;padding:0 10px">{{ currentTime }}</span>
           <span class="quick-date">{{ currentDate }}</span>
@@ -122,6 +123,13 @@
             <div class="weather-temp" v-if="weatherTemp !== null">{{ weatherTemp }}°C</div>
             <div class="weather-temp" v-else>--°C</div>
             <div class="weather-desc">{{ weatherDesc }}</div>
+            <div class="weather-city-row">
+              <button v-if="!editingCity" class="weather-city-btn" @click.stop="startEditCity">
+                {{ weatherCity }} <i class="fa-solid fa-pen-to-square"></i>
+              </button>
+              <input v-else ref="cityInput" class="weather-city-input" v-model="editCityText"
+                     @keydown.enter="saveEditCity" @blur="saveEditCity" @click.stop />
+            </div>
             <div class="weather-divider"></div>
             <div class="weather-time">{{ currentTime || '--:--' }}</div>
             <div class="weather-date">{{ currentDate }}</div>

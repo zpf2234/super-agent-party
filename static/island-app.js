@@ -311,6 +311,8 @@ function createIslandApp() {
         weatherCity: '北京',
         weatherLoading: false,
         weatherError: null,
+        editingCity: false,
+        editCityText: '',
 
         // Time
         currentTime: '',
@@ -1057,6 +1059,23 @@ function createIslandApp() {
         }
         this.weatherLoading = false;
       },
+      startEditCity() {
+        this.editCityText = this.weatherCity;
+        this.editingCity = true;
+        this.$nextTick(() => {
+          const el = this.$refs.cityInput;
+          if (el) { el.focus(); el.select(); }
+        });
+      },
+      saveEditCity() {
+        const v = (this.editCityText || '').trim();
+        if (v && v !== this.weatherCity) {
+          this.weatherCity = v;
+          localStorage.setItem('island_weather_city', v);
+          this.fetchWeather();
+        }
+        this.editingCity = false;
+      },
 
       // ===== WebSocket =====
       connectWS() {
@@ -1268,6 +1287,7 @@ function createIslandApp() {
         this.clipboardPinned = this.clipboardPinned.filter(pid => pid !== id);
         localStorage.setItem('island_clipboard', JSON.stringify(this.clipboardHistory));
         localStorage.setItem('island_clipboard_pinned', JSON.stringify(this.clipboardPinned));
+        if (this.clipboardHistory.length === 0) this.writeClipboardViaWS('');
       },
       clearClipboardHistory() {
         this.clipboardHistory = [];
@@ -1275,6 +1295,7 @@ function createIslandApp() {
         this.clipboardSearch = '';
         localStorage.setItem('island_clipboard', '[]');
         localStorage.setItem('island_clipboard_pinned', '[]');
+        this.writeClipboardViaWS('');
       },
       formatClipboardTime(ts) {
         const diff = Date.now() - ts;

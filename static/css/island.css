@@ -87,6 +87,14 @@
   flex-shrink: 0; font-size: 12px; color: rgba(255,255,255,0.7);
 }
 .quick-weather i { font-size: 14px; }
+.quick-weather-city {
+  font-size: 9px;
+  color: rgba(255,255,255,0.35);
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Quick 时间 */
 .quick-time {
@@ -263,6 +271,42 @@
 }
 .weather-desc {
   font-size: 13px; color: rgba(255,255,255,0.45);
+}
+.weather-city-row {
+  display: flex; align-items: center; justify-content: center;
+  -webkit-app-region: no-drag;
+}
+.weather-city-btn {
+  background: none; border: none;
+  font-size: 11px; color: rgba(255,255,255,0.35);
+  display: flex; align-items: center; gap: 5px;
+  cursor: pointer; font-family: inherit;
+  padding: 2px 8px; border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+  -webkit-app-region: no-drag;
+}
+.weather-city-btn:hover {
+  color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.06);
+}
+.weather-city-btn i {
+  font-size: 9px;
+  color: rgba(255,255,255,0.25);
+  transition: color 0.2s;
+}
+.weather-city-btn:hover i { color: rgba(255,255,255,0.5); }
+.weather-city-input {
+  width: 100px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  outline: none;
+  font-family: inherit;
+  text-align: center;
+  -webkit-app-region: no-drag;
 }
 .weather-divider {
   width: 80px; height: 1px;
@@ -1008,7 +1052,7 @@
   gap: 0;
   justify-content: flex-start !important;
   padding-top: 4px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .pomo-card {
@@ -1557,6 +1601,7 @@ html[data-theme="light"] #island .quick-theme-btn:hover { color: #d4970a; backgr
 html[data-theme="light"] #island .quick-minimal-btn { color: rgba(0,0,0,0.3); }
 html[data-theme="light"] #island .quick-minimal-btn:hover { color: #3ba33b; background: rgba(59,163,59,0.1); }
 html[data-theme="light"] #island .quick-weather i { color: rgba(0,0,0,0.5); }
+html[data-theme="light"] #island .quick-weather-city { color: rgba(0,0,0,0.3); }
 /* --- 告警 --- */
 html[data-theme="light"] #island .alert-close { opacity: 0.4; }
 html[data-theme="light"] #island .alert-action-btn {
@@ -1709,6 +1754,14 @@ html[data-theme="light"] #island .cal-time-sel {
 }
 /* --- 天气面板文字 --- */
 html[data-theme="light"] #island .weather-desc { color: rgba(0,0,0,0.5); }
+html[data-theme="light"] #island .weather-city-btn { color: rgba(0,0,0,0.35); }
+html[data-theme="light"] #island .weather-city-btn:hover { color: rgba(0,0,0,0.6); background: rgba(0,0,0,0.04); }
+html[data-theme="light"] #island .weather-city-btn i { color: rgba(0,0,0,0.25); }
+html[data-theme="light"] #island .weather-city-input {
+  background: rgba(0,0,0,0.06);
+  border-color: rgba(0,0,0,0.2);
+  color: rgba(0,0,0,0.8);
+}
 html[data-theme="light"] #island .weather-temp { color: rgba(0,0,0,0.8); }
 html[data-theme="light"] #island .weather-time { color: rgba(0,0,0,0.7); }
 html[data-theme="light"] #island .weather-date { color: rgba(0,0,0,0.45); }
