@@ -1477,6 +1477,40 @@ app.whenReady().then(async () => {
       return { success: true };
     });
 
+    // 剪切板 IPC
+    ipcMain.handle('clipboard-read', async () => {
+      try {
+        return clipboard.readText() || '';
+      } catch (e) { return ''; }
+    });
+    ipcMain.handle('clipboard-write', async (event, text) => {
+      try {
+        clipboard.writeText(String(text || ''));
+        return { success: true };
+      } catch (e) { return { success: false, error: e.message }; }
+    });
+    ipcMain.handle('clipboard-read-image', async () => {
+      try {
+        const img = clipboard.readImage();
+        if (img.isEmpty()) return null;
+        return img.toDataURL();
+      } catch (e) { return null; }
+    });
+    ipcMain.handle('clipboard-read-file-paths', async () => {
+      try {
+        let paths = clipboard.readFilePaths() || [];
+        if (!paths.length) {
+          const fileUrl = clipboard.read('public.file-url');
+          if (fileUrl) {
+            const url = require('url');
+            const fp = url.fileURLToPath(fileUrl.trim());
+            if (fp && fs.existsSync(fp)) paths = [fp];
+          }
+        }
+        return paths;
+      } catch (e) { return []; }
+    });
+
     // 文件夹递归复制
     function copyFolderSync(src, dest) {
       if (!fs.existsSync(src)) return;

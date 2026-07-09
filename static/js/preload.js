@@ -181,6 +181,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('accounts:launch', { accountId }),
   accountsSwitch: (accountId) =>
     ipcRenderer.invoke('accounts:switch', { accountId }),
+  // 剪切板
+  clipboardRead: () => ipcRenderer.invoke('clipboard-read'),
+  clipboardWrite: (text) => ipcRenderer.invoke('clipboard-write', text),
+  clipboardReadImage: () => ipcRenderer.invoke('clipboard-read-image'),
+  clipboardReadFilePaths: () => ipcRenderer.invoke('clipboard-read-file-paths'),
 });
 
 contextBridge.exposeInMainWorld('vmcAPI', {
