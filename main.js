@@ -1673,6 +1673,10 @@ app.whenReady().then(async () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('minimal-window-closed');
         }
+        // 通知灵动岛极简模式已关闭
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.webContents.send('minimal-window-closed');
+        }
       });
 
       return true;
@@ -1727,6 +1731,25 @@ app.whenReady().then(async () => {
       });
 
       remoteMain.enable(dynamicIslandWindow.webContents);
+
+      dynamicIslandWindow.webContents.on('render-process-gone', (event, details) => {
+        console.error('[Island] Render process gone:', details.reason, details.exitCode);
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.close();
+          dynamicIslandWindow = null;
+        }
+      });
+
+      dynamicIslandWindow.on('unresponsive', () => {
+        console.warn('[Island] Renderer unresponsive, restoring mouse forwarding');
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          if (isLinux) {
+            dynamicIslandWindow.setIgnoreMouseEvents(true);
+          } else {
+            dynamicIslandWindow.setIgnoreMouseEvents(true, { forward: true });
+          }
+        }
+      });
 
       if (isLinux) {
         dynamicIslandWindow.setIgnoreMouseEvents(true);
@@ -2060,6 +2083,9 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       currentLanguage = lang;
       updateTrayMenu();
       updatecontextMenu();
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.webContents.send('language-changed');
+      }
     });
     // 创建系统托盘
     createTray();

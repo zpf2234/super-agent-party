@@ -12013,6 +12013,24 @@ copySubtitleOverlayEndpoint(){
   });
 },
 
+copyMinimalEndpoint(){
+  const url = this.partyURL + '/minimal.html';
+  navigator.clipboard.writeText(url).then(() => {
+    if(typeof showNotification === 'function') showNotification(this.t('copySuccess') || 'Copied!', 'success');
+  }).catch(() => {
+    if(typeof showNotification === 'function') showNotification('Copy failed', 'error');
+  });
+},
+
+copyIslandEndpoint(){
+  const url = this.partyURL + '/island.html';
+  navigator.clipboard.writeText(url).then(() => {
+    if(typeof showNotification === 'function') showNotification(this.t('copySuccess') || 'Copied!', 'success');
+  }).catch(() => {
+    if(typeof showNotification === 'function') showNotification('Copy failed', 'error');
+  });
+},
+
 // 处理弹幕队列 - 新版
   async processDanmuQueue() {
     try {
