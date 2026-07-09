@@ -87,6 +87,9 @@
           </div>
           <span class="quick-time" style="border:none;padding:0 10px">{{ currentTime }}</span>
           <span class="quick-date">{{ currentDate }}</span>
+          <button class="quick-minimal-btn" @click.stop="toggleMinimalMode" :title="isMinimalMode ? t('minimalModeClose') : t('minimalMode')">
+            <i class="fa-solid fa-feather"></i>
+          </button>
           <button class="quick-theme-btn" @click.stop="toggleTheme" :title="themeMode === 'dark' ? '切换浅色' : '切换深色'">
             <i :class="themeMode === 'dark' ? 'fa-solid fa-sun' : 'fa-solid fa-moon'"></i>
           </button>
@@ -486,6 +489,53 @@
               </div>
             </div>
           </div>
+
+          <!-- 面板8: 翻译 -->
+          <div class="panel translate-panel" :style="panelStyles.p7">
+            <div class="translate-header">
+              <i class="fa-solid fa-language translate-icon"></i>
+              <span class="translate-title">{{ t('translateHeader') }}</span>
+            </div>
+            <textarea class="translate-source"
+                      v-model="sourceText"
+                      :placeholder="t('translateSourcePlaceholder')"
+                      @click.stop></textarea>
+            <div class="translate-bar">
+              <select class="translate-lang-sel" v-model="targetLang" @change="changeTranslateLang" @click.stop>
+                <option value="system">{{ t('translateSystemLang') }}</option>
+                <option value="简体中文">简体中文</option>
+                <option value="繁體中文">繁體中文</option>
+                <option value="English">English</option>
+                <option value="Français">Français</option>
+                <option value="Русский">Русский</option>
+                <option value="Deutsch">Deutsch</option>
+                <option value="Español">Español</option>
+                <option value="Portuguese">Portuguese</option>
+                <option value="日本語">日本語</option>
+                <option value="한국어">한국어</option>
+              </select>
+              <button class="translate-submit-btn" @click.stop="handleTranslate" :disabled="!sourceText.trim() || isTranslating">
+                <i v-if="isTranslating" class="fa-solid fa-spinner fa-spin"></i>
+                <i v-else class="fa-solid fa-arrow-right"></i>
+                {{ isTranslating ? '...' : t('translateBtn') }}
+              </button>
+            </div>
+            <div class="translate-result-wrap" ref="translateResultWrap">
+              <div class="translate-result-text" v-if="translatedText">{{ translatedText }}</div>
+              <div class="translate-result-empty" v-else>
+                <i class="fa-solid fa-language"></i>
+                <span>{{ t('translateResultPlaceholder') }}</span>
+              </div>
+            </div>
+            <div class="translate-result-bar" v-if="translatedText && !isTranslating">
+              <button class="translate-act-btn" @click.stop="copyTranslated" :title="t('translateCopy')">
+                <i class="fa-solid fa-copy"></i> {{ t('translateCopy') }}
+              </button>
+              <button class="translate-act-btn" @click.stop="clearTranslate" :title="t('translateClear')">
+                <i class="fa-solid fa-eraser"></i> {{ t('translateClear') }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- 面板指示器 -->
@@ -517,6 +567,10 @@
               <button class="panel-nav-btn" :class="{ active: activePanel === 6 }"
                       @click.stop="switchPanel(6)" :title="t('navClipboard')">
                 <i class="fa-solid fa-clipboard"></i>
+              </button>
+              <button class="panel-nav-btn" :class="{ active: activePanel === 7 }"
+                      @click.stop="switchPanel(7)" :title="t('navTranslate')">
+                <i class="fa-solid fa-language"></i>
               </button>
         </div>
       </template>

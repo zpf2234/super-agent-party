@@ -64,6 +64,17 @@ const I18N = {
     navPomodoro: '番茄',
     navTaskCenter: '任务中心',
     navClipboard: '剪切板',
+    navTranslate: '翻译',
+    translateHeader: '翻译',
+    translateSourcePlaceholder: '请输入要翻译的文本...',
+    translateTargetLang: '目标语言',
+    translateSystemLang: '跟随系统',
+    translateBtn: '翻译',
+    translateResultPlaceholder: '翻译结果将显示在这里',
+    translateCopy: '复制',
+    translateClear: '清空',
+    minimalMode: '极简模式',
+    minimalModeClose: '关闭极简模式',
     reminderHint: '点击展开灵动岛查看详情',
     timeJustNow: '刚刚',
     timeMinutesAgo: '分钟前',
@@ -183,6 +194,17 @@ const I18N = {
     navPomodoro: 'Pomodoro',
     navTaskCenter: 'Task Center',
     navClipboard: 'Clipboard',
+    navTranslate: 'Translate',
+    translateHeader: 'Translate',
+    translateSourcePlaceholder: 'Enter text to translate...',
+    translateTargetLang: 'Target Language',
+    translateSystemLang: 'System Default',
+    translateBtn: 'Translate',
+    translateResultPlaceholder: 'Translation result will appear here',
+    translateCopy: 'Copy',
+    translateClear: 'Clear',
+    minimalMode: 'Minimal Mode',
+    minimalModeClose: 'Close Minimal Mode',
     reminderHint: 'Click to expand Dynamic Island',
     timeJustNow: 'just now',
     timeMinutesAgo: 'm ago',
@@ -265,7 +287,7 @@ function createIslandApp() {
       return {
         islandLang: 'zh-CN',
         mode: 'still',           // still | quick | large
-        activePanel: 0,          // 0=weather, 1=music, 2=tasks, 3=calendar, 4=pomodoro, 5=taskcenter, 6=clipboard
+        activePanel: 0,          // 0=weather, 1=music, 2=tasks, 3=calendar, 4=pomodoro, 5=taskcenter, 6=clipboard, 7=translate
         themeMode: 'dark',
         isHovered: false,
         // Music state
@@ -344,6 +366,15 @@ function createIslandApp() {
         clipboardSearch: '',
         clipboardPinned: [],
         clipboardTimeout: null,
+        // Translate state
+        sourceText: '',
+        translatedText: '',
+        isTranslating: false,
+        targetLang: 'system',
+        targetLangActual: 'zh-CN',
+        translateAbortController: null,
+        // Minimal mode state
+        isMinimalMode: false,
         swipeStartX: 0,
         swipeStartY: 0,
         swipeMoved: false,
@@ -427,6 +458,11 @@ function createIslandApp() {
           })(),
           p6: (() => {
             const x = (6 - this.activePanel) * 100 + dragPct;
+            const dist = Math.abs(x) / 100;
+            return { transform: `translateX(${x}%)`, filter: `blur(${dist * maxBlur}px)`, opacity: 1 - dist * 0.5 };
+          })(),
+          p7: (() => {
+            const x = (7 - this.activePanel) * 100 + dragPct;
             const dist = Math.abs(x) / 100;
             return { transform: `translateX(${x}%)`, filter: `blur(${dist * maxBlur}px)`, opacity: 1 - dist * 0.5 };
           })()
@@ -617,6 +653,7 @@ function createIslandApp() {
       try { this.clipboardHistory = JSON.parse(localStorage.getItem('island_clipboard') || '[]'); } catch (e) { this.clipboardHistory = []; }
       this.clipboardHistory.forEach(h => { if (!h.type) h.type = this.detectContentType(h.text || ''); });
       try { this.clipboardPinned = JSON.parse(localStorage.getItem('island_clipboard_pinned') || '[]'); } catch (e) { this.clipboardPinned = []; }
+      this.targetLangActual = navigator.language || navigator.userLanguage || 'zh-CN';
       const today = new Date();
       this.calendarSelectedDate = fmtLocalDate(today);
       this.activeReminderTask = null;
@@ -645,6 +682,18 @@ function createIslandApp() {
       this.taskCenterTimer = setInterval(this.requestTasks, 10000);
       this._pollClipboard();
       this.readCurrentClipboard();
+
+      // Minimal window state
+      if (window.electronAPI && window.electronAPI.getMinimalWindowState) {
+        window.electronAPI.getMinimalWindowState().then(state => {
+          this.isMinimalMode = !!state;
+        });
+      }
+      if (window.electronAPI && window.electronAPI.onMinimalWindowClosed) {
+        window.electronAPI.onMinimalWindowClosed(() => {
+          this.isMinimalMode = false;
+        });
+      }
     },
 
     beforeUnmount() {
@@ -691,6 +740,16 @@ function createIslandApp() {
         this.themeMode = this.themeMode === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', this.themeMode);
         localStorage.setItem('island_theme', this.themeMode);
+      },
+      toggleMinimalMode() {
+        if (!window.electronAPI) return;
+        if (!this.isMinimalMode) {
+          window.electronAPI.openMinimalWindow();
+          this.isMinimalMode = true;
+        } else {
+          window.electronAPI.closeMinimalWindow();
+          this.isMinimalMode = false;
+        }
       },
 
       // ===== Mouse Events =====
@@ -820,7 +879,7 @@ function createIslandApp() {
           if (Math.abs(dx) >= 40) {
             const dir = dx < 0 ? 1 : -1;
             const newPanel = this.activePanel + dir;
-            if (newPanel >= 0 && newPanel <= 6) {
+            if (newPanel >= 0 && newPanel <= 7) {
               this.activePanel = newPanel;
             }
             this.suppressClick = true;
@@ -845,12 +904,12 @@ function createIslandApp() {
 
       movePanel(dir) {
         const next = this.activePanel + dir;
-        if (next < 0 || next > 6) return;
+        if (next < 0 || next > 7) return;
         this.activePanel = next;
       },
 
       switchPanel(idx) {
-        if (idx < 0 || idx > 6) return;
+        if (idx < 0 || idx > 7) return;
         this.activePanel = idx;
       },
 
@@ -1061,7 +1120,8 @@ function createIslandApp() {
           { name: 'island_clipboard_list', description: '列出剪切板历史记录', parameters: { type: 'object', properties: { query: { type: 'string', description: '搜索关键词, 可选' } }, required: [] } },
           { name: 'island_clipboard_get', description: '读取系统剪切板当前内容', parameters: { type: 'object', properties: {}, required: [] } },
           { name: 'island_clipboard_write', description: '写入文本到系统剪切板', parameters: { type: 'object', properties: { text: { type: 'string', description: '要写入的文本内容' } }, required: ['text'] } },
-          { name: 'island_clipboard_clear', description: '清空剪切板历史', parameters: { type: 'object', properties: {}, required: [] } }
+          { name: 'island_clipboard_clear', description: '清空剪切板历史', parameters: { type: 'object', properties: {}, required: [] } },
+          { name: 'island_translate', description: '翻译文本到指定语言', parameters: { type: 'object', properties: { text: { type: 'string', description: '要翻译的文本' }, target_lang: { type: 'string', description: '目标语言, 如 简体中文、English、日本語 等, 默认跟随系统' } }, required: ['text'] } }
         ] } }));
       },
 
@@ -1425,6 +1485,12 @@ function createIslandApp() {
             sendResult(this.t('mcpClipboardCleared'));
             return;
 
+          case 'island_translate':
+            const ttext = tp.text;
+            const tlang = (tp && tp.target_lang) ? tp.target_lang : this.targetLangActual;
+            this.mcpTranslate(ttext, tlang).then(sendResult);
+            return;
+
           default: sendResult(this.t('mcpUnknownTool') + tn);
         }
       },
@@ -1461,6 +1527,28 @@ function createIslandApp() {
           return lines.join('\n');
         } catch (err) {
           return `${this.t('mcpForecastError')}${err.message}`;
+        }
+      },
+
+      async mcpTranslate(text, targetLang) {
+        try {
+          const res = await fetch('/simple_chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [
+                { role: 'system', content: `你是一位专业翻译，请将用户提供的任何内容严格翻译为${targetLang}，保持原有格式（如Markdown、换行等），不要添加任何额外内容。只需返回翻译结果。` },
+                { role: 'user', content: `请翻译以下内容到${targetLang}：\n\n${text}` }
+              ],
+              stream: false,
+              temperature: 0.1
+            })
+          });
+          if (!res.ok) throw new Error('Network error');
+          const data = await res.json();
+          return data.choices?.[0]?.message?.content || '翻译失败';
+        } catch (err) {
+          return `翻译出错: ${err.message}`;
         }
       },
 
@@ -1662,6 +1750,94 @@ function createIslandApp() {
           }
         }
         if (triggered) this.saveTasks();
+      },
+      // ===== Translate =====
+      async handleTranslate() {
+        if (!this.sourceText.trim() || this.isTranslating) return;
+        this.isTranslating = true;
+        this.translatedText = '...';
+
+        const controller = new AbortController();
+        this.translateAbortController = controller;
+
+        const lang = this.targetLangActual;
+
+        try {
+          const res = await fetch('/simple_chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: [
+                {
+                  role: 'system',
+                  content: `你是一位专业翻译，请将用户提供的任何内容严格翻译为${lang}，保持原有格式（如Markdown、换行等），不要添加任何额外内容。只需返回翻译结果。如果被翻译的文字与目标语言一致，则返回原文即可。`
+                },
+                {
+                  role: 'user',
+                  content: `请翻译以下内容到${lang}：\n\n${this.sourceText}`
+                }
+              ],
+              stream: true,
+              temperature: 0.1
+            }),
+            signal: controller.signal
+          });
+
+          if (!res.ok) throw new Error('Network error');
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let result = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+              if (!line) continue;
+              try {
+                const chunk = JSON.parse(line);
+                const delta = chunk.choices?.[0]?.delta?.content ?? '';
+                if (delta) {
+                  result += delta;
+                  this.translatedText = result;
+                }
+              } catch {}
+            }
+          }
+        } catch (e) {
+          if (e.name !== 'AbortError') {
+            this.translatedText = 'Translation error: ' + e.message;
+          }
+        } finally {
+          this.isTranslating = false;
+          this.translateAbortController = null;
+        }
+      },
+      abortTranslate() {
+        if (this.translateAbortController) {
+          this.translateAbortController.abort();
+        }
+        this.isTranslating = false;
+      },
+      clearTranslate() {
+        this.sourceText = '';
+        this.translatedText = '';
+      },
+      copyTranslated() {
+        if (!this.translatedText) return;
+        this.writeClipboardViaWS(this.translatedText);
+        this.addClipboardItem(this.translatedText, 'manual');
+      },
+      changeTranslateLang() {
+        if (this.targetLang === 'system') {
+          this.targetLangActual = navigator.language || navigator.userLanguage || 'zh-CN';
+        } else {
+          this.targetLangActual = this.targetLang;
+        }
       }
     },
 

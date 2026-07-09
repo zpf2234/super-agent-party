@@ -1645,8 +1645,8 @@ app.whenReady().then(async () => {
       minimalWindow = new BrowserWindow({
         width: winW,
         height: winH,
-        x: Math.round(screenW - winW - 40),
-        y: Math.round((screenH - winH) / 2),
+        x: Math.round((screenW - winW) / 2),
+        y: Math.round(screenH - winH - 40),
         frame: false,
         transparent: true,
         alwaysOnTop: true,
