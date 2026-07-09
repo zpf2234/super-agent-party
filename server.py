@@ -4188,11 +4188,11 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             tools.append(brave_tool)
                         elif settings['webSearch']['engine'] == 'exa':
                             tools.append(exa_tool)
-                        elif settings['webSearch']['crawler'] == 'serper':
+                        elif settings['webSearch']['engine'] == 'serper':
                             tools.append(serper_tool)
-                        elif settings['webSearch']['crawler'] == 'bochaai':
+                        elif settings['webSearch']['engine'] == 'bochaai':
                             tools.append(bochaai_tool)
-                        elif settings['webSearch']['crawler'] == 'youcom':
+                        elif settings['webSearch']['engine'] == 'youcom':
                             tools.append(youcom_tool)
 
                         if settings['webSearch']['crawler'] == 'jina':
@@ -6241,11 +6241,11 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     tools.append(brave_tool)
                 elif settings['webSearch']['engine'] == 'exa':
                     tools.append(exa_tool)
-                elif settings['webSearch']['crawler'] == 'serper':
+                elif settings['webSearch']['engine'] == 'serper':
                     tools.append(serper_tool)
-                elif settings['webSearch']['crawler'] == 'bochaai':
+                elif settings['webSearch']['engine'] == 'bochaai':
                     tools.append(bochaai_tool)
-                elif settings['webSearch']['crawler'] == 'youcom':
+                elif settings['webSearch']['engine'] == 'youcom':
                     tools.append(youcom_tool)
 
                 if settings['webSearch']['crawler'] == 'jina' and not _is_steam_build:
