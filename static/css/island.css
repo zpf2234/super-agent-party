@@ -182,6 +182,22 @@
   background: rgba(255,200,80,0.1);
 }
 
+/* Quick 关闭按钮 */
+.quick-close-btn {
+  background: none; border: none;
+  color: rgba(255,255,255,0.35);
+  font-size: 14px; cursor: pointer;
+  flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.2s, background 0.2s;
+  -webkit-app-region: no-drag;
+}
+.quick-close-btn:hover {
+  color: #ff6b6b;
+  background: rgba(255,107,107,0.12);
+}
+
 /* Quick 极简模式按钮 */
 .quick-minimal-btn {
   background: none; border: none;
@@ -1154,19 +1170,16 @@
   width: 100%; padding: 0 4px;
 }
 .pomo-slider {
-  width: 100%; height: 4px; -webkit-appearance: none;
-  appearance: none; background: rgba(255,255,255,0.08);
-  border-radius: 2px; outline: none; cursor: pointer;
+  width: 100%; -webkit-appearance: none; appearance: none;
+  height: 3px; border-radius: 2px;
+  background: rgba(255,255,255,0.12);
+  outline: none; cursor: pointer;
   -webkit-app-region: no-drag;
 }
 .pomo-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 20px; height: 20px; border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-  cursor: pointer; transition: transform 0.15s;
+  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; cursor: pointer;
 }
-.pomo-slider::-webkit-slider-thumb:active { transform: scale(1.15); }
 
 .pomo-action-btn {
   width: 100%;
@@ -1588,7 +1601,7 @@
 }
 /* === 浅色主题覆盖 === */
 html[data-theme="light"] #island {
-  background: rgba(255,255,255,0.92) !important;
+  background: #ffffff !important;
   box-shadow: 0 0 24px rgba(0,0,0,0.08);
 }
 html[data-theme="light"] #island.has-alert {
@@ -1607,6 +1620,8 @@ html[data-theme="light"] #island .quick-date { color: rgba(0,0,0,0.4); }
 html[data-theme="light"] #island .quick-time { border-color: rgba(0,0,0,0.12); }
 html[data-theme="light"] #island .quick-theme-btn { color: rgba(0,0,0,0.3); }
 html[data-theme="light"] #island .quick-theme-btn:hover { color: #d4970a; background: rgba(200,160,0,0.08); }
+html[data-theme="light"] #island .quick-close-btn { color: rgba(0,0,0,0.3); }
+html[data-theme="light"] #island .quick-close-btn:hover { color: #cc3b3b; background: rgba(204,59,59,0.1); }
 html[data-theme="light"] #island .quick-minimal-btn { color: rgba(0,0,0,0.3); }
 html[data-theme="light"] #island .quick-minimal-btn:hover { color: #3ba33b; background: rgba(59,163,59,0.1); }
 html[data-theme="light"] #island .quick-weather i { color: rgba(0,0,0,0.5); }
@@ -1709,7 +1724,7 @@ html[data-theme="light"] #island .cal-month-grid-header span { color: rgba(0,0,0
 html[data-theme="light"] #island .cal-month-num { color: rgba(0,0,0,0.6); }
 html[data-theme="light"] #island .cal-month-cell.today .cal-month-num { color: #000; }
 html[data-theme="light"] #island .cal-month-cell:not(.today):not(.selected):not(.other) { background: rgba(0,0,0,0.03); }
-html[data-theme="light"] #island .cal-month-picker { background: rgba(255,255,255,0.97); }
+html[data-theme="light"] #island .cal-month-picker {   background: #ffffff; }
 html[data-theme="light"] #island .cal-month-picker-nav span { color: rgba(0,0,0,0.75); }
 html[data-theme="light"] #island .cal-month-cell:hover { background: rgba(0,0,0,0.04); }
 html[data-theme="light"] #island .cal-month-cell.otherMonth .cal-month-num { color: rgba(0,0,0,0.15); }
@@ -1738,6 +1753,13 @@ html[data-theme="light"] #island .pomo-mode-time { color: rgba(0,0,0,0.25); }
 html[data-theme="light"] #island .pomo-stat-text { color: rgba(0,0,0,0.35); }
 html[data-theme="light"] #island .pomo-action-btn.secondary { color: rgba(0,0,0,0.7); }
 html[data-theme="light"] #island .pomo-action-btn.danger { color: rgba(0,0,0,0.4); }
+html[data-theme="light"] #island .pomo-action-btn i { color: inherit; }
+html[data-theme="light"] #island .pomo-slider {
+  background: rgba(0,0,0,0.12);
+}
+html[data-theme="light"] #island .pomo-slider::-webkit-slider-thumb {
+  background: rgba(0,0,0,0.7);
+}
 html[data-theme="light"] #island .pomo-ring-bg { stroke: rgba(0,0,0,0.05); }
 /* --- 音乐 --- */
 html[data-theme="light"] #island .large-title { color: rgba(0,0,0,0.75); }
@@ -1751,7 +1773,7 @@ html[data-theme="light"] #island .panel-nav-btn:hover { color: rgba(0,0,0,0.55);
 html[data-theme="light"] #island .panel-nav-btn.active { color: rgba(0,0,0,0.85); background: rgba(0,0,0,0.08); }
 /* --- 告警浮层 --- */
 html[data-theme="light"] #island.large .alert-content {
-  background: rgba(255,255,255,0.96);
+  background: #ffffff;
   border: 1px solid rgba(0,0,0,0.1);
   box-shadow: 0 4px 20px rgba(0,0,0,0.1);
 }

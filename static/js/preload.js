@@ -147,6 +147,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('island-window-closed');
     ipcRenderer.on('island-window-closed', () => callback());
   },
+  onLanguageChanged: (callback) => {
+    ipcRenderer.removeAllListeners('language-changed');
+    ipcRenderer.on('language-changed', () => callback());
+  },
   getBackendLogs: () => ipcRenderer.invoke('get-backend-logs'),
 
   onRemoteInstall: (callback) => ipcRenderer.on('remote-install-any', (_, payload) => callback(payload)),

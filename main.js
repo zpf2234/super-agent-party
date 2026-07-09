@@ -2083,6 +2083,9 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       currentLanguage = lang;
       updateTrayMenu();
       updatecontextMenu();
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.webContents.send('language-changed');
+      }
     });
     // 创建系统托盘
     createTray();

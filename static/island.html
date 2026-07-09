@@ -95,6 +95,9 @@
           <button class="quick-theme-btn" @click.stop="toggleTheme" :title="themeMode === 'dark' ? '切换浅色' : '切换深色'">
             <i :class="themeMode === 'dark' ? 'fa-solid fa-sun' : 'fa-solid fa-moon'"></i>
           </button>
+          <button class="quick-close-btn" @click.stop="closeWindow" :title="islandLang === 'zh-CN' ? '关闭灵动岛' : 'Close Island'">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
         </div>
 
         <!-- 音乐播放中：歌名跑马灯（占满整个矩形） -->

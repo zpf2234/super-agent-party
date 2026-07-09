@@ -662,8 +662,8 @@ function createIslandApp() {
       this.activeReminderTask = null;
     },
 
-    mounted() {
-      this.fetchLanguage();
+    async mounted() {
+      await this.fetchLanguage();
       this.connectWS();
       this.updateTime();
       this.timeTimer = setInterval(this.updateTime, 30000);
@@ -697,6 +697,11 @@ function createIslandApp() {
           this.isMinimalMode = false;
         });
       }
+      if (window.electronAPI && window.electronAPI.onLanguageChanged) {
+        window.electronAPI.onLanguageChanged(() => {
+          this.fetchLanguage();
+        });
+      }
     },
 
     beforeUnmount() {
@@ -723,8 +728,12 @@ function createIslandApp() {
           const res = await fetch('/cur_language');
           const data = await res.json();
           if (I18N[data.language]) this.islandLang = data.language;
-          document.title = this.islandLang === 'zh-CN' ? '灵动岛' : 'Dynamic Island';
-        } catch (e) {}
+        } catch (e) {
+          const navLang = (navigator.language || navigator.userLanguage || '').startsWith('zh') ? 'zh-CN' : 'en-US';
+          this.islandLang = navLang;
+        }
+        document.title = this.islandLang === 'zh-CN' ? '灵动岛' : 'Dynamic Island';
+        this.updateTime();
       },
 
       // ===== Time =====
