@@ -309,6 +309,7 @@ import socket
 import sys
 import tempfile
 import httpx
+import aiohttp
 import ipaddress
 from urllib.parse import urlparse, urlunparse, urljoin
 from urllib.robotparser import RobotFileParser
@@ -5643,9 +5644,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 yield "data: [DONE]\n\n"
                 if not request.is_sub_agent:
                     try:
+                        increment_heatmap()
                         await ws_manager.broadcast({
                             "type": "island_ai_reply_done",
-                            "data": {"text": "智能体生成完毕！"}
+                            "data": {"text": "活干完啦，快来看看吧！"}
                         })
                     except Exception:
                         pass
@@ -11618,6 +11620,95 @@ def get_internal_ip():
 def get_ip():
     ip = get_internal_ip()
     return {"ip": ip}
+
+_ip_city_cache = None
+
+@app.get("/api/ip-city")
+async def get_ip_city():
+    global _ip_city_cache
+    if _ip_city_cache is not None:
+        return _ip_city_cache
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("http://ip-api.com/json/", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("status") == "success":
+                        _ip_city_cache = {
+                            "city": data.get("city", ""),
+                            "regionName": data.get("regionName", ""),
+                            "country": data.get("country", ""),
+                            "lat": data.get("lat"),
+                            "lon": data.get("lon"),
+                        }
+                        return _ip_city_cache
+    except Exception as e:
+        print(f"[IP City] Failed to fetch: {e}")
+    return {"city": "", "regionName": "", "country": "", "lat": None, "lon": None}
+
+@app.get("/api/weather")
+async def proxy_weather(lat: float, lon: float, daily: str = None, forecast_days: int = None):
+    try:
+        params = {"latitude": lat, "longitude": lon, "current_weather": "true"}
+        if daily:
+            params["daily"] = daily
+        if forecast_days:
+            params["forecast_days"] = str(forecast_days)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        print(f"[Weather Proxy] Failed: {e}")
+    return {"error": "weather_fetch_failed"}
+
+@app.get("/api/geocode")
+async def proxy_geocode(city: str, lang: str = "zh"):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": city, "count": 1, "language": lang},
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        print(f"[Geocode Proxy] Failed: {e}")
+    return {"error": "geocode_failed"}
+
+HEATMAP_FILE = os.path.join(USER_DATA_DIR, "island_heatmap.json")
+
+def _load_heatmap() -> dict:
+    try:
+        with open(HEATMAP_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_heatmap(data: dict):
+    os.makedirs(os.path.dirname(HEATMAP_FILE), exist_ok=True)
+    with open(HEATMAP_FILE, "w") as f:
+        json.dump(data, f)
+
+def increment_heatmap():
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = _load_heatmap()
+    data[today] = data.get(today, 0) + 1
+    _save_heatmap(data)
+
+@app.get("/api/heatmap")
+async def get_heatmap():
+    return _load_heatmap()
+
+@app.post("/api/heatmap/increment")
+async def post_heatmap_increment():
+    increment_heatmap()
+    return {"ok": True}
 
 
 async def sync_all_bots_behavior(settings_dict: dict):

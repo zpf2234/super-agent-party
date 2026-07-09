@@ -60,6 +60,11 @@
   display: flex; align-items: center; justify-content: center;
   will-change: width, height;
   -webkit-app-region: no-drag;
+  --heatmap-0: rgba(255,255,255,0.10);
+  --heatmap-1: rgba(82,197,128,0.25);
+  --heatmap-2: rgba(64,184,108,0.50);
+  --heatmap-3: rgba(46,170,88,0.72);
+  --heatmap-4: rgba(34,158,68,0.94);
 }
 
 #island:hover {
@@ -87,7 +92,7 @@
 .quick-content {
   display: flex; align-items: center;
   width: 100%; height: 40px;
-  gap: 6px;
+  gap: 2px;
 }
 
 /* Quick 天气图标 */
@@ -110,8 +115,7 @@
   font-size: 14px; font-weight: 600;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
-  padding: 0 6px;
-  border-right: 1px solid rgba(255,255,255,0.15);
+  padding: 0 4px;
 }
 
 /* 音乐全宽 跑马灯（占满整个 quick 矩形） */
@@ -162,7 +166,11 @@
 .quick-date {
   font-size: 11px; font-weight: 400;
   color: rgba(255,255,255,0.5);
-  flex-shrink: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
   padding: 0 4px;
 }
 
@@ -203,7 +211,7 @@
   background: none; border: none;
   color: rgba(255,255,255,0.35);
   font-size: 13px; cursor: pointer;
-  flex-shrink: 0; margin-left: auto;
+  flex-shrink: 0;
   width: 26px; height: 26px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
   transition: color 0.2s, background 0.2s;
@@ -214,9 +222,11 @@
   background: rgba(111,255,123,0.1);
 }
 
-/* 右侧按钮 */
+/* 右侧按钮区 */
 .quick-right {
   display: flex; align-items: center; flex-shrink: 0;
+  gap: 2px;
+  margin-left: auto;
 }
 .ctrl-btn-sm {
   background: none; border: none; color: #fff;
@@ -1599,6 +1609,114 @@
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
 }
+
+/* === 热力图面板 === */
+.heatmap-panel {
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.heatmap-header {
+  display: flex; align-items: center; gap: 8px;
+}
+.heatmap-icon {
+  font-size: 15px;
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: rgba(82,197,128,0.18);
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(82,197,128,0.9);
+  flex-shrink: 0;
+}
+.heatmap-title {
+  font-size: 13px; font-weight: 600;
+  color: rgba(255,255,255,0.85);
+}
+.heatmap-today {
+  margin-left: auto;
+  font-size: 11px; font-weight: 500;
+  color: rgba(82,197,128,0.85);
+  background: rgba(82,197,128,0.14);
+  padding: 3px 10px; border-radius: 10px;
+}
+.heatmap-card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  padding: 14px 14px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.heatmap-months {
+  display: grid;
+  grid-template-columns: repeat(15, 1fr);
+  gap: 3px;
+  padding-left: 32px;
+  margin-bottom: 2px;
+}
+.heatmap-months span {
+  font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.02em;
+}
+.heatmap-body {
+  display: flex; gap: 6px;
+}
+.heatmap-day-labels {
+  display: flex; flex-direction: column;
+  gap: 3px; width: 26px; flex-shrink: 0;
+  justify-content: space-between;
+}
+.heatmap-day-labels span {
+  font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.50);
+  height: 14px; line-height: 14px;
+  text-align: right; padding-right: 2px;
+}
+.heatmap-cells {
+  display: grid;
+  grid-template-columns: repeat(15, 1fr);
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  gap: 3px;
+  flex: 1;
+}
+.heatmap-cell {
+  width: 100%; aspect-ratio: 1;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  transition: background 0.3s ease, transform 0.15s ease;
+}
+.heatmap-cell:hover { transform: scale(1.3); z-index: 1; }
+.heatmap-cell.future { opacity: 0.2; }
+.heatmap-legend {
+  display: flex; align-items: center; gap: 3px;
+  padding-left: 32px;
+  margin-top: 2px;
+}
+.heatmap-legend-label {
+  font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.50);
+  margin: 0 4px;
+}
+.heatmap-cell.legend-cell {
+  width: 11px; height: 11px; border-radius: 3px;
+}
+.heatmap-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 10px; padding: 32px 16px;
+  color: rgba(255,255,255,0.30); font-size: 12px;
+  text-align: center; white-space: pre-line;
+  line-height: 1.6;
+}
+.heatmap-empty i {
+  font-size: 32px;
+  width: 56px; height: 56px;
+  border-radius: 16px;
+  background: rgba(82,197,128,0.12);
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(82,197,128,0.50);
+}
+
 /* === 浅色主题覆盖 === */
 html[data-theme="light"] #island {
   background: #ffffff !important;
@@ -1854,4 +1972,35 @@ html[data-theme="light"] #island .translate-result-text {
 html[data-theme="light"] #island .translate-result-empty { color: rgba(0,0,0,0.2); }
 html[data-theme="light"] #island .translate-act-btn { color: rgba(0,0,0,0.35); background: rgba(0,0,0,0.04); }
 html[data-theme="light"] #island .translate-act-btn:hover { color: rgba(0,0,0,0.7); background: rgba(0,0,0,0.08); }
+/* --- 热力图浅色 --- */
+html[data-theme="light"] #island {
+  --heatmap-0: rgba(0,0,0,0.08);
+  --heatmap-1: rgba(68,184,110,0.32);
+  --heatmap-2: rgba(52,168,90,0.55);
+  --heatmap-3: rgba(40,150,72,0.76);
+  --heatmap-4: rgba(30,136,54,0.94);
+}
+html[data-theme="light"] #island .heatmap-icon {
+  background: rgba(68,184,110,0.15);
+  color: rgba(30,136,54,0.85);
+}
+html[data-theme="light"] #island .heatmap-title { color: rgba(0,0,0,0.80); }
+html[data-theme="light"] #island .heatmap-today {
+  color: rgba(30,136,54,0.88);
+  background: rgba(68,184,110,0.16);
+}
+html[data-theme="light"] #island .heatmap-card {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.10);
+}
+html[data-theme="light"] #island .heatmap-months span { color: rgba(0,0,0,0.50); }
+html[data-theme="light"] #island .heatmap-day-labels span { color: rgba(0,0,0,0.45); }
+html[data-theme="light"] #island .heatmap-legend-label { color: rgba(0,0,0,0.45); }
+html[data-theme="light"] #island .heatmap-cell { background: rgba(0,0,0,0.08); }
+html[data-theme="light"] #island .heatmap-empty,
+html[data-theme="light"] #island .heatmap-empty i { color: rgba(0,0,0,0.40); }
+html[data-theme="light"] #island .heatmap-empty i {
+  background: rgba(68,184,110,0.1);
+  color: rgba(68,184,110,0.45);
+}
 html[data-theme="light"] #island .translate-result-wrap::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
