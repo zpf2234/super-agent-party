@@ -2118,7 +2118,7 @@ formatMessage(content, index) {
           this.ocSettings = data.data.ocSettings || this.ocSettings;
           this.HASettings = data.data.HASettings || this.HASettings;
           this.chromeMCPSettings = data.data.chromeMCPSettings || this.chromeMCPSettings;
-          this.localAppControlSettings = data.data.localAppControlSettings || this.localAppControlSettings;
+          if (data.data.localAppControlSettings) Object.assign(this.localAppControlSettings, data.data.localAppControlSettings);
           this.sqlSettings = data.data.sqlSettings || this.sqlSettings;
           this.KBSettings = data.data.KBSettings || this.KBSettings;
           this.mcpServers = data.data.mcpServers || this.mcpServers;
@@ -2203,7 +2203,7 @@ formatMessage(content, index) {
           this.ocSettings = data.data.ocSettings || this.ocSettings;
           this.HASettings = data.data.HASettings || this.HASettings;
           this.chromeMCPSettings = data.data.chromeMCPSettings || this.chromeMCPSettings;
-          this.localAppControlSettings = data.data.localAppControlSettings || this.localAppControlSettings;
+          if (data.data.localAppControlSettings) Object.assign(this.localAppControlSettings, data.data.localAppControlSettings);
           this.sqlSettings = data.data.sqlSettings || this.sqlSettings;
           this.KBSettings = data.data.KBSettings || this.KBSettings;
           this.textFiles = data.data.textFiles || this.textFiles;
@@ -12505,13 +12505,22 @@ copyIslandEndpoint(){
       }
     } catch (e) {}
 
-    // 2. 直连失败 → 启动新实例（不杀现有进程，--user-data-dir 保证独立 profile）
-    showNotification('正在启动调试实例…', 'info');
+    // 2. 直连失败 → 启动应用
+    showNotification(this.localAppControlSettings.forceNewInstance ? '正在启动新调试实例…' : '正在启动调试连接…', 'info');
 
     app.cdpPort = port;
     this.localAppControlSettings.nextPort = port + 1;
-    await window.electronAPI.launchAppWithDebugging({ path: app.path, port: port });
-    app.isRunning = true;
+    const launchResult = await window.electronAPI.launchAppWithDebugging({
+      path: app.path,
+      port: port,
+      forceNewInstance: this.localAppControlSettings.forceNewInstance
+    });
+    if (launchResult && launchResult.success) {
+      app.isRunning = true;
+      app.pid = launchResult.pid || app.pid;
+    } else {
+      app.isRunning = true;
+    }
 
     // 3. 轮询连接，最多 20 秒（浏览器启动慢）
     for (let i = 0; i < 20; i++) {
@@ -12642,10 +12651,21 @@ copyIslandEndpoint(){
 
   async quitLocalApp(app) {
     if (!this.isElectron || !window.electronAPI) return;
+    // If connected, disconnect from CDP backend first
+    if (this.isAppConnected(app)) {
+      try {
+        await fetch('/disconnect-app-cdp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: this.localAppControlSettings.connectedApps[app.id]?.port, appId: app.id })
+        });
+      } catch (e) {}
+    }
     try {
       const result = await window.electronAPI.quitAppProcess({ pid: app.pid, path: app.path });
       if (result && result.success) {
         app.isRunning = false;
+        app.pid = 0;
         delete this.localAppControlSettings.connectedApps[app.id];
         showNotification(this.t('success_quit_app'));
       } else {
