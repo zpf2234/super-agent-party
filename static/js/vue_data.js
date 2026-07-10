@@ -456,6 +456,15 @@ let vue_data = {
       browserVision: false,
       onlyNewScreen: true,
     },
+    localAppControlSettings: {
+      enabled: false,
+      browserVision: false,
+      scannedApps: [],
+      connectedApps: {},
+      nextPort: 9223,
+      scanning: false,
+      selectedApp: null,
+    },
     sqlSettings:{
       enabled: false,
       engine: "sqlite",
@@ -1376,6 +1385,7 @@ let vue_data = {
       { id: 'visionControl', title: 'visionControl', icon: 'fa-solid fa-arrow-pointer'},
       { id: 'HA', title: 'homeAssistant', icon: 'fa-solid fa-house'},
       { id: 'chromeMCP', title: 'browserControl', icon: 'fa-solid fa-compass' },
+      { id: 'localAppControl', title: 'localAppControl', icon: 'fa-solid fa-display' },
       { id: 'sql', title: 'sqlControl', icon: 'fa-solid fa-database' },
       { id: 'comfyui', title: 'ComfyUI', icon: 'fa-solid fa-palette'},
       { id: 'mcp', title: 'mcpServers', icon: 'fa-solid fa-server'},

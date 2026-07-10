@@ -4,7 +4,7 @@ const { clipboard, nativeImage,desktopCapturer  } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const { spawn } = require('child_process')
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const { download } = require('electron-dl');
 const fs = require('fs')
 const os = require('os')
@@ -435,6 +435,274 @@ async function findAvailablePort(startPort = DEFAULT_PORT, maxAttempts = 20000) 
     }
   }
   throw new Error(`无法找到可用端口，已尝试 ${startPort} 到 ${startPort + maxAttempts - 1}`)
+}
+
+// ============================================================
+// 本地应用控制：扫描本地 Electron 应用
+// ============================================================
+async function scanLocalElectronApps() {
+  const apps = [];
+  const platform = process.platform;
+  const candidatePaths = [];
+
+  if (platform === 'darwin') {
+    candidatePaths.push('/Applications');
+    try { candidatePaths.push(path.join(os.homedir(), 'Applications')); } catch (e) {}
+  } else if (platform === 'win32') {
+    candidatePaths.push('C:\\Program Files', 'C:\\Program Files (x86)');
+    try { candidatePaths.push(path.join(os.homedir(), 'AppData', 'Local', 'Programs')); } catch (e) {}
+  } else {
+    candidatePaths.push('/usr/share/applications', '/usr/local/share/applications');
+    try { candidatePaths.push(path.join(os.homedir(), '.local', 'share', 'applications')); } catch (e) {}
+  }
+
+  const idCounter = { val: 0 };
+
+  for (const dir of candidatePaths) {
+    try {
+      if (!fs.existsSync(dir)) continue;
+      const entries = fs.readdirSync(dir);
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry);
+        if (platform === 'darwin' && entry.endsWith('.app')) {
+          const appInfo = parseMacApp(fullPath, idCounter);
+          if (appInfo) apps.push(appInfo);
+        } else if (platform === 'win32') {
+          const appInfo = await parseWinApp(fullPath, entry, idCounter);
+          if (appInfo) apps.push(appInfo);
+        } else {
+          if (entry.endsWith('.desktop')) {
+            const appInfo = await parseLinuxDesktopEntry(fullPath, idCounter);
+            if (appInfo) apps.push(appInfo);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[LocalAppControl] 读取目录失败:', dir, e.message);
+    }
+  }
+
+  return apps;
+}
+
+function parseMacApp(appPath, idCounter) {
+  try {
+    const infoPlistPath = path.join(appPath, 'Contents', 'Info.plist');
+    let bundleId = '';
+    let version = '';
+    let name = path.basename(appPath, '.app');
+
+    if (fs.existsSync(infoPlistPath)) {
+      try {
+        const json = execSync(`plutil -convert json -o - "${infoPlistPath}"`, { encoding: 'utf8', timeout: 2000 });
+        const parsed = JSON.parse(json);
+        name = parsed.CFBundleDisplayName || parsed.CFBundleName || name;
+        bundleId = parsed.CFBundleIdentifier || '';
+        version = parsed.CFBundleShortVersionString || parsed.CFBundleVersion || '';
+      } catch (e) {}
+    }
+
+    let isElectron = false;
+
+    if (/electron/i.test(bundleId)) {
+      isElectron = true;
+    }
+
+    if (!isElectron) {
+      const resourcesDir = path.join(appPath, 'Contents', 'Resources');
+      if (fs.existsSync(resourcesDir)) {
+        try {
+          const files = fs.readdirSync(resourcesDir);
+          if (files.some(f => f.endsWith('.asar'))) isElectron = true;
+          if (files.some(f => f === 'package-info')) isElectron = true;
+        } catch (e) {}
+      }
+    }
+
+    if (!isElectron) {
+      const frameworksDir = path.join(appPath, 'Contents', 'Frameworks');
+      if (fs.existsSync(frameworksDir)) {
+        try {
+          const entries = fs.readdirSync(frameworksDir);
+          for (const entry of entries) {
+            if (!entry.endsWith('.framework')) continue;
+            const currentPath = path.join(frameworksDir, entry, 'Versions', 'Current');
+            if (!fs.existsSync(currentPath)) continue;
+            try {
+              const subs = fs.readdirSync(currentPath);
+              const hasHelpers = subs.includes('Helpers');
+              const hasLibraries = subs.includes('Libraries');
+              const hasResources = subs.includes('Resources');
+              if (hasHelpers && hasLibraries && hasResources) {
+                isElectron = true;
+                break;
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (!isElectron) return null;
+
+    idCounter.val++;
+    const isRunning = checkIfAppRunning(bundleId || name);
+    
+    return {
+      id: 'app_' + idCounter.val,
+      name: name,
+      path: appPath,
+      version: version,
+      bundleId: bundleId,
+      isElectron: true,
+      isRunning: isRunning,
+      pid: isRunning ? findAppPid(bundleId || name) : 0,
+      icon: null,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function parseWinApp(fullPath, entry, idCounter) {
+  try {
+    const electronExePath = path.join(fullPath, 'electron.exe');
+    const isElectron = fs.existsSync(electronExePath);
+    if (!isElectron) return null;
+
+    const stats = fs.statSync(fullPath);
+    if (!stats.isDirectory()) return null;
+
+    idCounter.val++;
+    const name = entry.replace(/\.exe$/i, '') || path.basename(fullPath);
+    const isRunning = checkIfAppRunning(name);
+    
+    return {
+      id: 'app_' + idCounter.val,
+      name: name,
+      path: fullPath,
+      version: '',
+      bundleId: name,
+      isElectron: true,
+      isRunning: isRunning,
+      pid: isRunning ? findAppPid(name) : 0,
+      icon: null,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function parseLinuxDesktopEntry(desktopPath, idCounter) {
+  try {
+    const content = fs.readFileSync(desktopPath, 'utf8');
+    const execMatch = content.match(/^Exec=(.+)$/m);
+    const nameMatch = content.match(/^Name=(.+)$/m);
+    if (!execMatch) return null;
+
+    const execLine = execMatch[1].replace(/%[fFuUdDnNickvm]/g, '').trim();
+    const name = nameMatch ? nameMatch[1] : path.basename(desktopPath, '.desktop');
+    
+    if (!execLine.toLowerCase().includes('electron')) return null;
+
+    idCounter.val++;
+    const isRunning = checkIfAppRunning(name);
+    
+    return {
+      id: 'app_' + idCounter.val,
+      name: name,
+      path: execLine,
+      version: '',
+      bundleId: name,
+      isElectron: true,
+      isRunning: isRunning,
+      pid: isRunning ? findAppPid(name) : 0,
+      icon: null,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function checkIfAppRunning(identifier) {
+  try {
+    const result = findAppPid(identifier);
+    return result > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+function findAppPid(identifier) {
+  try {
+    const platform = process.platform;
+    if (platform === 'darwin') {
+      const result = execSync(`pgrep -f "${identifier}" 2>/dev/null || echo "0"`, { encoding: 'utf8' });
+      const pids = result.trim().split('\n').filter(p => p).map(Number).filter(p => p > 0 && p !== process.pid);
+      return pids.length > 0 ? pids[0] : 0;
+    } else if (platform === 'win32') {
+      try {
+        const result = execSync(`tasklist /FI "IMAGENAME eq ${identifier}.exe" 2>nul | find /i "${identifier}"`, { encoding: 'utf8', timeout: 3000 });
+        const match = result.match(/\b\d+\b/);
+        return match ? parseInt(match[0]) : 0;
+      } catch (e) {
+        return 0;
+      }
+    } else {
+      const result = execSync(`pgrep -f "${identifier}" 2>/dev/null || echo "0"`, { encoding: 'utf8' });
+      const pids = result.trim().split('\n').filter(p => p).map(Number).filter(p => p > 0 && p !== process.pid);
+      return pids.length > 0 ? pids[0] : 0;
+    }
+  } catch (e) {
+    return 0;
+  }
+}
+
+async function launchAppWithDebugging(appPath, port) {
+  try {
+    if (process.platform === 'darwin') {
+      const macosDir = path.join(appPath, 'Contents', 'MacOS');
+      if (fs.existsSync(macosDir)) {
+        const files = fs.readdirSync(macosDir);
+        const executable = files.find(f => !f.startsWith('.') && !f.endsWith('.plist'));
+        if (executable) {
+          appPath = path.join(macosDir, executable);
+        }
+      }
+    }
+
+    const child = spawn(appPath, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+
+    await new Promise(r => setTimeout(r, 2000));
+    return { success: true, pid: child.pid, port: port };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+async function quitAppProcess(pid, appPath) {
+  try {
+    if (pid && pid > 0) {
+      try { process.kill(pid, 'SIGTERM'); } catch (e) {}
+      await new Promise(r => setTimeout(r, 1000));
+      try { process.kill(pid, 'SIGKILL'); } catch (e) {}
+    } else if (appPath) {
+      const identifier = path.basename(appPath, '.app');
+      const foundPid = findAppPid(identifier);
+      if (foundPid > 0) {
+        try { process.kill(foundPid, 'SIGTERM'); } catch (e) {}
+        await new Promise(r => setTimeout(r, 1000));
+        try { process.kill(foundPid, 'SIGKILL'); } catch (e) {}
+      }
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 }
 
 // ============================================================
@@ -1276,6 +1544,39 @@ app.whenReady().then(async () => {
     })
 
     // ============================================================
+    // 本地应用控制 IPC 处理器
+    // ============================================================
+    ipcMain.handle('scan-local-electron-apps', async () => {
+      try {
+        const apps = await scanLocalElectronApps();
+        return apps;
+      } catch (e) {
+        console.error('[LocalAppControl] 扫描失败:', e);
+        return [];
+      }
+    });
+
+    ipcMain.handle('launch-app-with-debugging', async (event, { path: appPath, port }) => {
+      try {
+        const result = await launchAppWithDebugging(appPath, port);
+        return result;
+      } catch (e) {
+        console.error('[LocalAppControl] 启动失败:', e);
+        return { success: false, error: e.message };
+      }
+    });
+
+    ipcMain.handle('quit-app-process', async (event, { pid, path: appPath }) => {
+      try {
+        const result = await quitAppProcess(pid, appPath);
+        return result;
+      } catch (e) {
+        console.error('[LocalAppControl] 退出失败:', e);
+        return { success: false, error: e.message };
+      }
+    });
+
+    // ============================================================
     // 账户管理 IPC 处理器
     // ============================================================
     ipcMain.handle('accounts:get-all', () => {
@@ -1570,7 +1871,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('save-screenshot-direct', async (event, { buffer }) => {
       // 1. 确定保存路径: userData/uploaded_files
       // 确保这个路径和 Python 后端挂载的静态目录一致
-      const uploadDir = path.join(app.getPath('userData'),'Super-Agent-Party', 'uploaded_files');
+      const uploadDir = path.join(app.getPath('userData'), 'uploaded_files');
       
       // 2. 确保目录存在
       if (!fs.existsSync(uploadDir)) {

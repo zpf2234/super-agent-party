@@ -2118,6 +2118,7 @@ formatMessage(content, index) {
           this.ocSettings = data.data.ocSettings || this.ocSettings;
           this.HASettings = data.data.HASettings || this.HASettings;
           this.chromeMCPSettings = data.data.chromeMCPSettings || this.chromeMCPSettings;
+          this.localAppControlSettings = data.data.localAppControlSettings || this.localAppControlSettings;
           this.sqlSettings = data.data.sqlSettings || this.sqlSettings;
           this.KBSettings = data.data.KBSettings || this.KBSettings;
           this.mcpServers = data.data.mcpServers || this.mcpServers;
@@ -2202,6 +2203,7 @@ formatMessage(content, index) {
           this.ocSettings = data.data.ocSettings || this.ocSettings;
           this.HASettings = data.data.HASettings || this.HASettings;
           this.chromeMCPSettings = data.data.chromeMCPSettings || this.chromeMCPSettings;
+          this.localAppControlSettings = data.data.localAppControlSettings || this.localAppControlSettings;
           this.sqlSettings = data.data.sqlSettings || this.sqlSettings;
           this.KBSettings = data.data.KBSettings || this.KBSettings;
           this.textFiles = data.data.textFiles || this.textFiles;
@@ -4769,6 +4771,7 @@ formatMessage(content, index) {
           ocSettings: this.ocSettings,
           HASettings: this.HASettings,
           chromeMCPSettings: this.chromeMCPSettings,
+          localAppControlSettings: this.localAppControlSettings,
           sqlSettings: this.sqlSettings,
           KBSettings: this.KBSettings,
           textFiles: cleanFiles(this.textFiles),
@@ -12438,6 +12441,256 @@ copyIslandEndpoint(){
       }
     }
     this.autoSaveSettings();
+  },
+
+  async toggleLocalAppControl() {
+    await this.autoSaveSettings();
+    if (this.localAppControlSettings.enabled) {
+      await this.syncAppConnections();
+    }
+  },
+
+  async syncAppConnections() {
+    try {
+      const response = await fetch('/app-cdp-status');
+      if (response.ok) {
+        const data = await response.json();
+        const livePorts = new Set((data.connections || []).map(c => c.port));
+        let changed = false;
+        for (const appId of Object.keys(this.localAppControlSettings.connectedApps)) {
+          const conn = this.localAppControlSettings.connectedApps[appId];
+          if (!livePorts.has(conn.port)) {
+            delete this.localAppControlSettings.connectedApps[appId];
+            changed = true;
+          }
+        }
+        if (changed) {
+          await this.autoSaveSettings();
+        }
+      }
+    } catch (e) {
+      console.error('同步连接状态失败:', e);
+    }
+  },
+
+  async scanLocalApps() {
+    if (!this.isElectron || !window.electronAPI) return;
+    this.localAppControlSettings.scanning = true;
+    try {
+      const apps = await window.electronAPI.scanLocalElectronApps();
+      this.localAppControlSettings.scannedApps = apps || [];
+      showNotification(this.t('success_scan_apps').replace('{count}', this.localAppControlSettings.scannedApps.length));
+    } catch (e) {
+      console.error('扫描本地应用失败:', e);
+      showNotification(this.t('error_launch_app'), 'error');
+    } finally {
+      this.localAppControlSettings.scanning = false;
+    }
+    this.autoSaveSettings();
+  },
+
+  async launchAppWithCDP(app) {
+    if (!this.isElectron || !window.electronAPI) return;
+    try {
+      const port = this.localAppControlSettings.nextPort;
+      const result = await window.electronAPI.launchAppWithDebugging({ path: app.path, port: port });
+      if (result && result.success) {
+        app.isRunning = true;
+        app.cdpPort = port;
+        this.localAppControlSettings.nextPort = port + 1;
+        showNotification(this.t('success_launch_app'));
+      } else {
+        showNotification(this.t('error_launch_app'), 'error');
+      }
+    } catch (e) {
+      console.error('启动应用失败:', e);
+      showNotification(this.t('error_launch_app'), 'error');
+    }
+    this.autoSaveSettings();
+  },
+
+  async connectToApp(app) {
+    if (!app.cdpPort) {
+      app.cdpPort = this.localAppControlSettings.nextPort;
+      this.localAppControlSettings.nextPort = app.cdpPort + 1;
+    }
+    try {
+      const response = await fetch('/connect-app-cdp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: app.cdpPort, appId: app.id, appName: app.name })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        this.localAppControlSettings.connectedApps[app.id] = {
+          appId: app.id,
+          appName: app.name,
+          port: app.cdpPort,
+          targets: data.targets || [],
+          activeWsUrl: data.activeWsUrl || null,
+          status: 'connected'
+        };
+        app.isRunning = true;
+        await this.autoSaveSettings();
+        showNotification(this.t('success_connect_app'));
+      } else {
+        showNotification(this.t('error_connect_app'), 'error');
+      }
+    } catch (e) {
+      console.error('连接应用失败:', e);
+      showNotification(this.t('error_connect_app'), 'error');
+    }
+  },
+
+  async disconnectFromApp(app) {
+    const conn = this.localAppControlSettings.connectedApps[app.id];
+    const port = conn ? conn.port : app.cdpPort;
+    if (!port) {
+      showNotification(this.t('error_disconnect_app'), 'error');
+      return;
+    }
+    try {
+      const response = await fetch('/disconnect-app-cdp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: port, appId: app.id })
+      });
+      if (response.ok) {
+        delete this.localAppControlSettings.connectedApps[app.id];
+        await this.autoSaveSettings();
+        showNotification(this.t('success_disconnect_app'));
+      } else {
+        showNotification(this.t('error_disconnect_app'), 'error');
+      }
+    } catch (e) {
+      console.error('断开应用失败:', e);
+      showNotification(this.t('error_disconnect_app'), 'error');
+    }
+  },
+
+  async quitLocalApp(app) {
+    if (!this.isElectron || !window.electronAPI) return;
+    try {
+      const result = await window.electronAPI.quitAppProcess({ pid: app.pid, path: app.path });
+      if (result && result.success) {
+        app.isRunning = false;
+        delete this.localAppControlSettings.connectedApps[app.id];
+        showNotification(this.t('success_quit_app'));
+      } else {
+        showNotification(this.t('error_quit_app'), 'error');
+      }
+    } catch (e) {
+      console.error('退出应用失败:', e);
+      showNotification(this.t('error_quit_app'), 'error');
+    }
+    this.autoSaveSettings();
+  },
+
+  isAppConnected(app) {
+    return !!this.localAppControlSettings.connectedApps[app.id];
+  },
+
+  getAppPort(app) {
+    const conn = this.localAppControlSettings.connectedApps[app.id];
+    return conn ? conn.port : (app.cdpPort || '');
+  },
+
+  getAppPages(app) {
+    const conn = this.localAppControlSettings.connectedApps[app.id];
+    if (!conn || !conn.targets) return [];
+    return conn.targets.filter(t => t.webSocketDebuggerUrl);
+  },
+
+  async selectAppPage(app, page) {
+    if (!page.id) return;
+    const conn = this.localAppControlSettings.connectedApps[app.id];
+    if (!conn) return;
+    try {
+      const response = await fetch('/switch-external-target', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: conn.port, targetId: page.id })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          conn.activeWsUrl = page.webSocketDebuggerUrl;
+          showNotification('已切换 target');
+        }
+      }
+    } catch (e) {
+      console.error('切换 target 失败:', e);
+    }
+  },
+
+  async refreshAppTargets(app) {
+    const conn = this.localAppControlSettings.connectedApps[app.id];
+    if (!conn) return;
+    try {
+      const response = await fetch('/refresh-external-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: conn.port })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.targets) {
+          conn.targets = data.targets;
+        }
+      }
+    } catch (e) {
+      console.error('刷新 targets 失败:', e);
+    }
+  },
+
+  async screenshotApp(app) {
+    try {
+      const response = await fetch('/execute-external-cdp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: this.getAppPort(app), method: 'Page.captureScreenshot', params: {} })
+      });
+      if (response.ok) {
+        showNotification('截图成功');
+      }
+    } catch (e) {
+      console.error('截图失败:', e);
+    }
+  },
+
+  async snapshotApp(app) {
+    try {
+      const response = await fetch('/execute-external-cdp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: this.getAppPort(app), method: 'Runtime.evaluate', params: { expression: 'document.body.innerText', returnByValue: true } })
+      });
+      if (response.ok) {
+        showNotification('快照成功');
+      }
+    } catch (e) {
+      console.error('快照失败:', e);
+    }
+  },
+
+  async executeJSInApp(app) {
+    const conn = this.localAppControlSettings.connectedApps[app.id];
+    if (!conn || !conn.wsUrl) {
+      showNotification('请先选择应用页面', 'warning');
+      return;
+    }
+    try {
+      const response = await fetch('/execute-external-cdp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: this.getAppPort(app), method: 'Runtime.evaluate', params: { expression: '1 + 1', returnByValue: true } })
+      });
+      if (response.ok) {
+        showNotification('执行成功');
+      }
+    } catch (e) {
+      console.error('执行JS失败:', e);
+    }
   },
 
   async changeSqlEnabled() {

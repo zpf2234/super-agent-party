@@ -9860,6 +9860,112 @@ function updateElement(el, rawMarkdown, formatFn) {
                 </div>
               </div>
               
+              <!-- 本地应用控制界面 -->
+              <div v-show="subMenu === 'localAppControl'" class="page">
+                <div class="toolbar">
+                    <el-alert
+                      :title="t('localAppControlDescription')"
+                      type="info"
+                      :closable="false"
+                      class="mb-2">
+                    </el-alert>
+                </div>
+                <el-form v-if="isElectron" :model="localAppControlSettings" class="settings-form" label-position="top">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-display"></i>
+                          </el-icon>
+                          {{ t('localAppControl') }}
+                        </span>
+                      </div>
+                      <el-switch v-model="localAppControlSettings.enabled" @click.stop @change="toggleLocalAppControl"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('browserVision')" class="form-item-align" label-position="left">
+                        <el-switch v-model="localAppControlSettings.browserVision" @change="autoSaveSettings"></el-switch>
+                      </el-form-item>
+                      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+                        <el-button type="primary" @click="scanLocalApps" :loading="localAppControlSettings.scanning">
+                          {{ localAppControlSettings.scanning ? t('scanning') : t('scanLocalApps') }}
+                        </el-button>
+                        <span style="font-size:13px;color:var(--el-text-color-secondary);">
+                          {{ t('connectedApps') }}: {{ connectedAppCount }}
+                        </span>
+                      </div>
+
+                      <div v-if="localAppControlSettings.scannedApps.length === 0 && !localAppControlSettings.scanning" style="text-align:center;padding:20px;color:var(--el-text-color-secondary);">
+                        <el-empty :description="t('noLocalAppsFound')" />
+                      </div>
+
+                      <div v-for="(app, index) in localAppControlSettings.scannedApps" :key="app.id" style="margin-bottom:8px;">
+                        <el-card shadow="hover" class="sherpa-card">
+                          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                            <div style="display:flex;align-items:center;gap:10px;">
+                              <img v-if="app.icon" :src="app.icon" style="width:32px;height:32px;border-radius:6px;" />
+                              <div>
+                                <strong>{{ app.name }}</strong>
+                                <div style="font-size:12px;color:var(--el-text-color-secondary);">{{ app.path }}</div>
+                              </div>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                              <el-tag v-if="app.isRunning" :type="isAppConnected(app) ? 'success' : 'warning'" size="small">
+                                {{ isAppConnected(app) ? t('appStatusConnected') : t('appStatusRunning') }}
+                              </el-tag>
+                              <el-tag v-else type="info" size="small">{{ t('appStatusStopped') }}</el-tag>
+                              <span v-if="isAppConnected(app)" style="font-size:12px;color:var(--el-text-color-secondary);">
+                                {{ t('cdpPort') }}: {{ getAppPort(app) }}
+                              </span>
+                            </div>
+                          </div>
+                          <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+                            <el-button v-if="!app.isRunning" size="small" type="primary" @click="launchAppWithCDP(app)">
+                              <i class="fa-solid fa-rocket"></i> {{ t('launchDebug') }}
+                            </el-button>
+                            <el-button v-if="app.isRunning && !isAppConnected(app)" size="small" type="primary" @click="connectToApp(app)">
+                              <i class="fa-solid fa-plug"></i> {{ t('connectApp') }}
+                            </el-button>
+                            <el-button v-if="isAppConnected(app)" size="small" type="danger" @click="disconnectFromApp(app)">
+                              <i class="fa-solid fa-plug-circle-xmark"></i> {{ t('disconnectApp') }}
+                            </el-button>
+                            <el-button v-if="app.isRunning && !isAppConnected(app)" size="small" type="danger" @click="quitLocalApp(app)">
+                              <i class="fa-solid fa-power-off"></i> {{ t('quitApp') }}
+                            </el-button>
+                          </div>
+                          <div v-if="isAppConnected(app)" style="margin-top:10px;border-top:1px solid var(--el-border-color-light);padding-top:10px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                              <span style="font-size:13px;font-weight:600;">{{ t('appPages') }}:</span>
+                              <el-button size="small" text @click="refreshAppTargets(app)"><i class="fa-solid fa-rotate"></i></el-button>
+                            </div>
+                            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">
+                              <el-tag v-for="(page, pi) in getAppPages(app)" :key="pi" size="small" style="cursor:pointer;"
+                                :type="page.type === 'webview' ? 'warning' : ''"
+                                @click="selectAppPage(app, page)">{{ page.title || page.type + ' ' + pi }} <span style="opacity:0.6;font-size:10px;">({{ page.type }})</span></el-tag>
+                            </div>
+                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                              <el-button size="small" @click="screenshotApp(app)">
+                                <i class="fa-solid fa-camera"></i> {{ t('takeScreenshot') }}
+                              </el-button>
+                              <el-button size="small" @click="snapshotApp(app)">
+                                <i class="fa-solid fa-list-check"></i> {{ t('takeSnapshot') }}
+                              </el-button>
+                              <el-button size="small" @click="executeJSInApp(app)">
+                                <i class="fa-solid fa-code"></i> {{ t('executeJS') }}
+                              </el-button>
+                            </div>
+                          </div>
+                        </el-card>
+                      </div>
+                    </div>
+                  </div>
+                </el-form>
+                <div v-else>
+                  <el-empty :description="t('webNotSupported')" />
+                </div>
+              </div>
+
               <!-- SQL控制界面 -->
               <div v-show="subMenu === 'sql'" class="page">
                 <el-form :model="sqlSettings" class="settings-form"  label-position="top">
