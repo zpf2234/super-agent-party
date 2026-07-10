@@ -3123,6 +3123,7 @@ formatMessage(content, index) {
                 backend_content: [{ role: 'assistant', content: '' }],
                 toolBlocks: {},
                 displayBlocks: [],
+                segments: null,
                 isOmni: this.settings.enableOmniTTS || this.fastSettings.enableOmniTTS,
                 omniAudioChunks: [], ttsChunks: [], chunks_voice: [], audioChunks: [],
                 isPlaying: false, total_tokens: 0, first_token_latency: 0, elapsedTime: 0,
@@ -3175,7 +3176,7 @@ formatMessage(content, index) {
             }
             
             // 创建新块并推入数组
-            const newBlock = { type, id, name, content: '', args: '', data: null };
+        const newBlock = { type, id, name, content: '', args: '', data: null, segments: null };
             blocks.push(newBlock);
             return newBlock;
         };
@@ -4196,7 +4197,7 @@ formatMessage(content, index) {
                 msg.content += chunk;
 
                 this._typewriterTickCount = (this._typewriterTickCount || 0) + 1;
-                if (this._typewriterTickCount % 8 === 0 || buffer.length === 0) {
+                if (this._typewriterTickCount % 8 === 0 || !this._streamTextBuffer) {
                     block.segments = this.splitMessageContent(block.content);
                     msg.segments = this.splitMessageContent(msg.content);
                 }
@@ -4212,8 +4213,9 @@ formatMessage(content, index) {
     },
 
     flushStreamTextBuffer() {
-        if (this._streamTargetMsg && this._streamTextBuffer) {
-            const block = this.getBlockForMsg(this._streamTargetMsg, 'text');
+        if (!this._streamTargetMsg) return;
+        const block = this.getBlockForMsg(this._streamTargetMsg, 'text');
+        if (this._streamTextBuffer) {
             if (block) {
                 const MAX_TEXT_CONTENT = 150000;
                 if (block.content.length < MAX_TEXT_CONTENT) {
@@ -4221,16 +4223,18 @@ formatMessage(content, index) {
                 } else if (!block.content.endsWith('\n... (Truncated)')) {
                     block.content += '\n... (Truncated)';
                 }
-                block.segments = this.splitMessageContent(block.content);
                 if (this._streamTargetMsg.pure_content.length < MAX_TEXT_CONTENT) {
                     this._streamTargetMsg.pure_content += this._streamTextBuffer;
                 }
                 this._streamTargetMsg.content += this._streamTextBuffer;
-                this._streamTargetMsg.segments = this.splitMessageContent(this._streamTargetMsg.content);
             }
             this._streamTextBuffer = '';
-            this.requestScrollToBottom();
         }
+        if (block) {
+            block.segments = this.splitMessageContent(block.content);
+            this._streamTargetMsg.segments = this.splitMessageContent(this._streamTargetMsg.content);
+        }
+        this.requestScrollToBottom();
     },
 
 
@@ -4348,7 +4352,7 @@ formatMessage(content, index) {
             if (name && !last.name) last.name = name;
             return last;
         }
-        const newBlock = { type, id, name, content: '', args: '', data: null };
+        const newBlock = { type, id, name, content: '', args: '', data: null, segments: null };
         msg.displayBlocks.push(newBlock);
 
         // 🔥 关键：添加新块后立即裁剪，只保留最后 MAX_RENDERED_BLOCKS 个块
