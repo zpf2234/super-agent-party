@@ -55,7 +55,10 @@ def _pick_best_target(targets, preferred_id=None):
                 return t.get("webSocketDebuggerUrl")
     for t in targets:
         if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
-            return t["webSocketDebuggerUrl"]
+            return t.get("webSocketDebuggerUrl")
+    for t in targets:
+        if t.get("type") == "webview" and t.get("webSocketDebuggerUrl"):
+            return t.get("webSocketDebuggerUrl")
     for t in targets:
         if t.get("webSocketDebuggerUrl"):
             return t["webSocketDebuggerUrl"]
@@ -78,17 +81,22 @@ async def connect_to_external_app(port: int, app_id: str = "", app_name: str = "
         return {"success": False, "error": str(e), "targets": []}
 
     ws_url = _pick_best_target(targets)
-    page_target = None
+    first_target = None
     for t in targets:
-        if t.get("type") == "page":
-            page_target = t
+        if t.get("type") in ("page", "webview") and t.get("webSocketDebuggerUrl"):
+            first_target = t
             break
+    if not first_target:
+        for t in targets:
+            if t.get("webSocketDebuggerUrl"):
+                first_target = t
+                break
 
     _外部连接[port] = {
         "targets": targets,
         "ws": None,
         "active_ws_url": ws_url,
-        "active_target_id": page_target.get("id", "") if page_target else "",
+        "active_target_id": first_target.get("id", "") if first_target else "",
         "connected_at": asyncio.get_event_loop().time(),
         "app_name": app_name,
         "app_id": app_id,
@@ -104,8 +112,9 @@ async def connect_to_external_app(port: int, app_id: str = "", app_name: str = "
 
     page_count = len([t for t in targets if t.get("type") == "page"])
     webview_count = len([t for t in targets if t.get("type") == "webview"])
-    print(f"[LocalAppControl] 端口 {port}: {len(targets)} targets (page={page_count}, webview={webview_count})")
-    return {"success": True, "message": "连接成功", "targets": targets, "activeWsUrl": ws_url}
+    usable_count = len([t for t in targets if t.get("webSocketDebuggerUrl") and t.get("type") not in ("worker","service_worker","shared_worker")])
+    print(f"[LocalAppControl] 端口 {port}: {len(targets)} targets (page={page_count}, webview={webview_count}, usable={usable_count})")
+    return {"success": True, "message": "连接成功", "targets": targets, "activeWsUrl": ws_url, "usableCount": usable_count}
 
 
 async def disconnect_from_external_app(port: int) -> dict:
@@ -141,6 +150,16 @@ async def switch_external_target(port: int, target_id: str = "") -> dict:
     if not target:
         for t in targets:
             if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
+                target = t
+                break
+    if not target:
+        for t in targets:
+            if t.get("type") == "webview" and t.get("webSocketDebuggerUrl"):
+                target = t
+                break
+    if not target:
+        for t in targets:
+            if t.get("webSocketDebuggerUrl"):
                 target = t
                 break
 

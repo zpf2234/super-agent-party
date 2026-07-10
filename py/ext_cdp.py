@@ -11,12 +11,14 @@ def _is_external():
 
 
 async def _ext_cmd(method, params=None):
+    global EXTERNAL_CDP_PORT
     from py.local_app_control import get_connected_ports, execute_external_cdp
     if EXTERNAL_CDP_PORT <= 0:
         ports = get_connected_ports()
         if ports:
-            return {"error": f"请先 select_external_app(port={ports[0]}) 选择本地应用"}
-        return {"error": "没有已连接的本地应用"}
+            EXTERNAL_CDP_PORT = ports[0]
+        else:
+            return {"error": "没有已连接的本地应用"}
     return await execute_external_cdp(EXTERNAL_CDP_PORT, method, params)
 
 

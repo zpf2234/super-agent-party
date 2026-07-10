@@ -660,25 +660,55 @@ function findAppPid(identifier) {
 
 async function launchAppWithDebugging(appPath, port) {
   try {
-    if (process.platform === 'darwin') {
-      const macosDir = path.join(appPath, 'Contents', 'MacOS');
-      if (fs.existsSync(macosDir)) {
-        const files = fs.readdirSync(macosDir);
-        const executable = files.find(f => !f.startsWith('.') && !f.endsWith('.plist'));
-        if (executable) {
-          appPath = path.join(macosDir, executable);
+    const profileDir = path.join(os.tmpdir(), `sap-cdp-profile-${port}`);
+    try { fs.mkdirSync(profileDir, { recursive: true }); } catch (e) {}
+
+    const debugArgs = [
+      `--remote-debugging-port=${port}`,
+      '--remote-debugging-address=127.0.0.1',
+      `--user-data-dir=${profileDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+    ];
+
+    let child;
+    if (process.platform === 'darwin' && appPath.endsWith('.app')) {
+      // macOS: 用 open -n 强制新实例，避免 NSApplication 路由到已有进程
+      const appName = path.basename(appPath, '.app');
+      const openArgs = ['-n', '-a', appName, '--args', ...debugArgs];
+      child = spawn('open', openArgs, { detached: true, stdio: 'ignore' });
+    } else {
+      let execPath = appPath;
+      if (process.platform === 'darwin' && appPath.endsWith('.app')) {
+        const macosDir = path.join(appPath, 'Contents', 'MacOS');
+        if (fs.existsSync(macosDir)) {
+          const files = fs.readdirSync(macosDir);
+          const electronBin = files.find(f => f === 'Electron');
+          const otherBin = files.find(f => !f.startsWith('.') && !f.endsWith('.plist') && f !== 'Electron');
+          execPath = path.join(macosDir, electronBin || otherBin || files[0]);
         }
       }
+      child = spawn(execPath, debugArgs, { detached: true, stdio: 'ignore' });
     }
-
-    const child = spawn(appPath, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1'], {
-      detached: true,
-      stdio: 'ignore',
-    });
     child.unref();
 
-    await new Promise(r => setTimeout(r, 2000));
-    return { success: true, pid: child.pid, port: port };
+    // 轮询等待 CDP 端口就绪，最多 15 秒
+    let portReady = false;
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        await new Promise((resolve, reject) => {
+          const req = require('http').get(`http://127.0.0.1:${port}/json/version`, (res) => {
+            resolve(res.statusCode);
+          });
+          req.on('error', reject);
+          req.setTimeout(800, () => { req.destroy(); reject(new Error('timeout')); });
+        });
+        portReady = true;
+        break;
+      } catch (e) {}
+    }
+    return { success: portReady, pid: child.pid, port: port };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -686,18 +716,40 @@ async function launchAppWithDebugging(appPath, port) {
 
 async function quitAppProcess(pid, appPath) {
   try {
+    const platform = process.platform;
+    if (platform === 'darwin' && appPath) {
+      // macOS: 用 bundleId 或 app 名称优雅退出
+      const infoPlist = path.join(appPath, 'Contents', 'Info.plist');
+      let bundleId = '';
+      if (fs.existsSync(infoPlist)) {
+        try {
+          const json = execSync(`plutil -convert json -o - "${infoPlist}"`, { encoding: 'utf8', timeout: 2000 });
+          const plist = JSON.parse(json);
+          bundleId = plist.CFBundleIdentifier || '';
+        } catch (e) {}
+      }
+      if (bundleId) {
+        try { execSync(`osascript -e 'tell application id "${bundleId}" to quit'`, { timeout: 5000 }); } catch (e) {}
+      } else {
+        const appName = path.basename(appPath, '.app');
+        try { execSync(`osascript -e 'tell application "${appName}" to quit'`, { timeout: 5000 }); } catch (e) {}
+      }
+      await new Promise(r => setTimeout(r, 2000));
+
+      // 再强制杀残留进程
+      const name = path.basename(appPath, '.app');
+      try { execSync(`pkill -9 -f "${name}" 2>/dev/null || true`, { timeout: 3000 }); } catch (e) {}
+      await new Promise(r => setTimeout(r, 1000));
+      return { success: true };
+    }
+
     if (pid && pid > 0) {
       try { process.kill(pid, 'SIGTERM'); } catch (e) {}
       await new Promise(r => setTimeout(r, 1000));
       try { process.kill(pid, 'SIGKILL'); } catch (e) {}
     } else if (appPath) {
       const identifier = path.basename(appPath, '.app');
-      const foundPid = findAppPid(identifier);
-      if (foundPid > 0) {
-        try { process.kill(foundPid, 'SIGTERM'); } catch (e) {}
-        await new Promise(r => setTimeout(r, 1000));
-        try { process.kill(foundPid, 'SIGKILL'); } catch (e) {}
-      }
+      try { execSync(`pkill -9 -f "${identifier}" 2>/dev/null || true`, { timeout: 3000 }); } catch (e) {}
     }
     return { success: true };
   } catch (e) {

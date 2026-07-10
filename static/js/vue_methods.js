@@ -12477,6 +12477,69 @@ copyIslandEndpoint(){
     }
   },
 
+  async smartConnectApp(app) {
+    if (!this.isElectron || !window.electronAPI) return;
+    const port = app.cdpPort || this.localAppControlSettings.nextPort;
+
+    // 1. 先试试直接连接（端口可能已经开着）
+    try {
+      const resp = await fetch('/connect-app-cdp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: port, appId: app.id, appName: app.name })
+      });
+      if (resp.ok) {
+        const d = await resp.json();
+        if (d.success) {
+          this.localAppControlSettings.connectedApps[app.id] = {
+            appId: app.id, appName: app.name, port: port,
+            targets: d.targets || [], usableCount: d.usableCount || 0,
+            activeWsUrl: d.activeWsUrl || null, status: 'connected'
+          };
+          if (!app.cdpPort) { app.cdpPort = port; this.localAppControlSettings.nextPort = port + 1; }
+          app.isRunning = true;
+          await this.autoSaveSettings();
+          showNotification(this.t('success_connect_app'));
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // 2. 直连失败 → 启动新实例（不杀现有进程，--user-data-dir 保证独立 profile）
+    showNotification('正在启动调试实例…', 'info');
+
+    app.cdpPort = port;
+    this.localAppControlSettings.nextPort = port + 1;
+    await window.electronAPI.launchAppWithDebugging({ path: app.path, port: port });
+    app.isRunning = true;
+
+    // 3. 轮询连接，最多 20 秒（浏览器启动慢）
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const resp = await fetch('/connect-app-cdp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: port, appId: app.id, appName: app.name })
+        });
+        if (resp.ok) {
+          const d = await resp.json();
+          if (d.success) {
+            this.localAppControlSettings.connectedApps[app.id] = {
+              appId: app.id, appName: app.name, port: port,
+              targets: d.targets || [], usableCount: d.usableCount || 0,
+              activeWsUrl: d.activeWsUrl || null, status: 'connected'
+            };
+            await this.autoSaveSettings();
+            showNotification(this.t('success_connect_app'));
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+    showNotification('应用已启动但未就绪，稍后重试连接', 'warning');
+  },
+
   async scanLocalApps() {
     if (!this.isElectron || !window.electronAPI) return;
     this.localAppControlSettings.scanning = true;
@@ -12526,11 +12589,16 @@ copyIslandEndpoint(){
       });
       if (response.ok) {
         const data = await response.json();
+        if (!data.success) {
+          showNotification(this.t('error_connect_app') + ': ' + (data.error || ''), 'error');
+          return;
+        }
         this.localAppControlSettings.connectedApps[app.id] = {
           appId: app.id,
           appName: app.name,
           port: app.cdpPort,
           targets: data.targets || [],
+          usableCount: data.usableCount || 0,
           activeWsUrl: data.activeWsUrl || null,
           status: 'connected'
         };
@@ -12602,7 +12670,7 @@ copyIslandEndpoint(){
   getAppPages(app) {
     const conn = this.localAppControlSettings.connectedApps[app.id];
     if (!conn || !conn.targets) return [];
-    return conn.targets.filter(t => t.webSocketDebuggerUrl);
+    return conn.targets.filter(t => t.webSocketDebuggerUrl && !['worker', 'service_worker', 'shared_worker'].includes(t.type));
   },
 
   async selectAppPage(app, page) {
