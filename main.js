@@ -440,49 +440,269 @@ async function findAvailablePort(startPort = DEFAULT_PORT, maxAttempts = 20000) 
 // ============================================================
 // 本地应用控制：扫描本地 Electron 应用
 // ============================================================
-async function scanLocalElectronApps() {
-  const apps = [];
-  const platform = process.platform;
-  const candidatePaths = [];
 
-  if (platform === 'darwin') {
-    candidatePaths.push('/Applications');
-    try { candidatePaths.push(path.join(os.homedir(), 'Applications')); } catch (e) {}
-  } else if (platform === 'win32') {
-    candidatePaths.push('C:\\Program Files', 'C:\\Program Files (x86)');
-    try { candidatePaths.push(path.join(os.homedir(), 'AppData', 'Local', 'Programs')); } catch (e) {}
-  } else {
-    candidatePaths.push('/usr/share/applications', '/usr/local/share/applications');
-    try { candidatePaths.push(path.join(os.homedir(), '.local', 'share', 'applications')); } catch (e) {}
-  }
+function normalizePathForDedup(p) {
+  return (p || '').toLowerCase().replace(/\\/g, '/');
+}
 
-  const idCounter = { val: 0 };
-
-  for (const dir of candidatePaths) {
-    try {
-      if (!fs.existsSync(dir)) continue;
-      const entries = fs.readdirSync(dir);
+function findElectronExe(dir, maxDepth) {
+  if (maxDepth === undefined) maxDepth = 2;
+  if (!fs.existsSync(dir) || maxDepth < 0) return null;
+  let stat;
+  try { stat = fs.statSync(dir); } catch (e) { return null; }
+  if (!stat.isDirectory()) return null;
+  try {
+    const entries = fs.readdirSync(dir);
+    if (process.platform === 'win32' && entries.includes('electron.exe')) return path.join(dir, 'electron.exe');
+    if (process.platform === 'linux' && entries.includes('electron')) return path.join(dir, 'electron');
+    if (entries.some(f => f.endsWith('.asar'))) return dir;
+    if (entries.includes('resources')) {
+      try {
+        const resEntries = fs.readdirSync(path.join(dir, 'resources'));
+        if (resEntries.some(e => e === 'app' || e === 'app.asar' || e.endsWith('.asar'))) return dir;
+      } catch (e) {}
+    }
+    if (maxDepth > 0) {
+      const skipDirs = process.platform === 'win32'
+        ? ['Windows', 'System32', 'WinSxS', 'Microsoft.NET', 'Common7', 'WindowsApps', 'Package Cache', 'Reference Assemblies', 'MSBuild']
+        : [];
       for (const entry of entries) {
-        const fullPath = path.join(dir, entry);
-        if (platform === 'darwin' && entry.endsWith('.app')) {
-          const appInfo = parseMacApp(fullPath, idCounter);
-          if (appInfo) apps.push(appInfo);
-        } else if (platform === 'win32') {
-          const appInfo = await parseWinApp(fullPath, entry, idCounter);
-          if (appInfo) apps.push(appInfo);
-        } else {
-          if (entry.endsWith('.desktop')) {
-            const appInfo = await parseLinuxDesktopEntry(fullPath, idCounter);
-            if (appInfo) apps.push(appInfo);
+        if (skipDirs.includes(entry)) continue;
+        if (entry.startsWith('.')) continue;
+        try {
+          const s = fs.statSync(path.join(dir, entry));
+          if (s.isDirectory()) {
+            const found = findElectronExe(path.join(dir, entry), maxDepth - 1);
+            if (found) return found;
           }
-        }
+        } catch (e) {}
       }
-    } catch (e) {
-      console.error('[LocalAppControl] 读取目录失败:', dir, e.message);
+    }
+  } catch (e) {}
+  return null;
+}
+
+function quickElectronCheck(dir) {
+  if (!fs.existsSync(dir)) return false;
+  let stat;
+  try { stat = fs.statSync(dir); } catch (e) { return false; }
+  if (!stat.isDirectory()) return false;
+  try {
+    const entries = fs.readdirSync(dir);
+    if (process.platform === 'win32' && entries.includes('electron.exe')) return true;
+    if (entries.some(f => f.endsWith('.asar'))) return true;
+    if (entries.includes('resources')) return true;
+    // Do NOT check for any .exe — too broad, catches installers/uninstallers
+  } catch (e) {}
+  return false;
+}
+
+function checkBinaryIsElectron(binaryPath) {
+  if (!fs.existsSync(binaryPath)) return false;
+  let stat;
+  try { stat = fs.statSync(binaryPath); } catch (e) { return false; }
+  if (!stat.isFile()) return false;
+  try {
+    execSync(`strings "${binaryPath}" 2>/dev/null | head -200 | grep -qiE 'electron|chrome/'`, { encoding: 'utf8', timeout: 5000 });
+    return true;
+  } catch (e) {}
+  try {
+    const lddResult = execSync(`ldd "${binaryPath}" 2>/dev/null | head -50`, { encoding: 'utf8', timeout: 5000 });
+    if (/libffmpeg\.so|libnode\.so|libEGL\.so|libGLESv2\.so/i.test(lddResult)) return true;
+  } catch (e) {}
+  return false;
+}
+
+function extractBinaryPath(execLine) {
+  let cleaned = execLine.replace(/%[fFuUdDnNickvm]/g, '').trim();
+  cleaned = cleaned.replace(/^env\s+(?:[A-Za-z_]\w*=\S+\s+)+/, '').trim();
+  cleaned = cleaned.replace(/^gtk-launch\s+\S+\s*/, '').trim();
+  // Also strip quoted wrapper
+  cleaned = cleaned.replace(/^(["'])(.*)\1$/, '$2').trim();
+  const parts = cleaned.split(/\s+/);
+  for (const part of parts) {
+    if (part.includes('/') && !part.startsWith('-')) return part;
+  }
+  return parts[0] || '';
+}
+
+// ====== Windows: 注册表扫描 ======
+
+function parseRegistryOutput(output) {
+  const entries = [];
+  const lines = output.split(/\r?\n/);
+  let current = null;
+  for (const line of lines) {
+    if (/^HKEY_/.test(line.trim())) {
+      if (current && current.DisplayName) entries.push(current);
+      current = { keyPath: line.trim() };
+      continue;
+    }
+    if (!current) continue;
+    const match = line.match(/^\s{4}(DisplayName|InstallLocation|DisplayVersion|Publisher|UninstallString)\s+REG\w*\s+(.+)/i);
+    if (match) {
+      current[match[1]] = match[2].trim();
     }
   }
+  if (current && current.DisplayName) entries.push(current);
+  return entries;
+}
 
-  return apps;
+async function scanWinRegistryApps() {
+  const results = [];
+  const roots = [
+    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+    'HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+    'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+  ];
+
+  // Use PowerShell wrapper for UTF-8 encoding (fixes garbled text on non-English Windows)
+  // Combine all 3 roots into a single PowerShell call for speed
+  const combined = roots.map(r => `reg query '${r}' /s`).join('; ');
+  const psCmd = `[Console]::OutputEncoding = [Text.Encoding]::UTF8; ${combined}`;
+
+  try {
+    const output = execSync(`powershell -NoProfile -Command "${psCmd}"`, {
+      encoding: 'utf8',
+      timeout: 25000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const entries = parseRegistryOutput(output);
+    for (const entry of entries) {
+      let installPath = '';
+      if (entry.InstallLocation) {
+        installPath = entry.InstallLocation.replace(/^"(.*)"$/, '$1').replace(/\\$/, '');
+        if (installPath.startsWith('"') && installPath.endsWith('"')) {
+          installPath = installPath.slice(1, -1);
+        }
+      } else if (entry.UninstallString) {
+        const us = entry.UninstallString.replace(/^"(.*)"$/, '$1');
+        installPath = path.dirname(us);
+      }
+      if (!installPath || !fs.existsSync(installPath)) continue;
+
+      // Fast pre-check before expensive recursive scan
+      if (!quickElectronCheck(installPath)) continue;
+      const electronPath = findElectronExe(installPath);
+      if (!electronPath) continue;
+
+      results.push({
+        name: entry.DisplayName || path.basename(installPath),
+        path: installPath,
+        version: entry.DisplayVersion || '',
+        bundleId: entry.DisplayName || path.basename(installPath),
+      });
+    }
+  } catch (e) {
+    console.error('[LocalAppControl] 注册表扫描失败:', e.message);
+  }
+
+  return results;
+}
+
+// ====== Windows: 开始菜单扫描 ======
+
+async function scanStartMenuRecursive(dir, addApp, yield_, maxDepth) {
+  if (maxDepth === undefined) maxDepth = 4;
+  if (!fs.existsSync(dir) || maxDepth < 0) return;
+  await yield_();
+  try {
+    const entries = fs.readdirSync(dir);
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          if (maxDepth > 0) await scanStartMenuRecursive(fullPath, addApp, yield_, maxDepth - 1);
+        } else if (entry.toLowerCase().endsWith('.lnk')) {
+          await yield_();
+          // Skip installer/uninstaller by shortcut name (quick filter for English systems)
+          const lnkName = path.basename(entry, '.lnk');
+          if (/uninstall|install|update|setup|remove|repair|config/i.test(lnkName)) continue;
+          let target = '';
+          try {
+            const details = shell.readShortcutLink(fullPath);
+            target = details.target || '';
+          } catch (e) {}
+          if (!target || !fs.existsSync(target)) continue;
+          // Skip if target binary is an installer/uninstaller (covers ALL languages — binary filenames are always English)
+          const targetName = path.basename(target, path.extname(target));
+          if (!fs.statSync(target).isDirectory() && /uninstall|install|update|setup|remove|repair/i.test(targetName)) continue;
+          const targetDir = fs.statSync(target).isDirectory() ? target : path.dirname(target);
+          if (!quickElectronCheck(targetDir)) continue;
+          const electronPath = findElectronExe(targetDir);
+          if (!electronPath) continue;
+          // Extract exe name from shortcut target for reliable PID matching
+          const isFileTarget = !fs.statSync(target).isDirectory();
+          const exeName = isFileTarget ? path.basename(target, path.extname(target)) : null;
+          addApp({
+            name: path.basename(entry, '.lnk'),
+            path: targetDir,
+            version: '',
+            bundleId: path.basename(entry, '.lnk'),
+            exeName: exeName,
+          });
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+async function scanWinStartMenu(addApp, yield_) {
+  const startMenuDirs = [];
+  try {
+    if (process.env.APPDATA) startMenuDirs.push(path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs'));
+    if (process.env.PROGRAMDATA) startMenuDirs.push(path.join(process.env.PROGRAMDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs'));
+  } catch (e) {}
+  for (const dir of startMenuDirs) {
+    await scanStartMenuRecursive(dir, addApp, yield_);
+  }
+}
+
+// ====== Windows: 文件系统扫描 ======
+
+async function scanWinFileSystemDirs(dirs, results) {
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const entries = fs.readdirSync(dir);
+      for (const entry of entries) {
+        try {
+          const fullPath = path.join(dir, entry);
+          const stat = fs.statSync(fullPath);
+          if (!stat.isDirectory()) continue;
+          if (!quickElectronCheck(fullPath)) continue;
+          const electronPath = findElectronExe(fullPath);
+          if (electronPath) {
+            results.push({
+              name: entry.replace(/\.exe$/i, ''),
+              path: fullPath,
+              version: '',
+              bundleId: entry.replace(/\.exe$/i, ''),
+            });
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+}
+
+// ====== macOS: 解析 .app 包 ======
+
+function checkMacBinaryIsElectron(appPath) {
+  const macosDir = path.join(appPath, 'Contents', 'MacOS');
+  if (!fs.existsSync(macosDir)) return false;
+  try {
+    const files = fs.readdirSync(macosDir);
+    const binFile = files.find(f => !f.startsWith('.'));
+    if (!binFile) return false;
+    const binPath = path.join(macosDir, binFile);
+    try {
+      execSync(`strings "${binPath}" 2>/dev/null | head -100 | grep -qi electron`, { encoding: 'utf8', timeout: 3000 });
+      return true;
+    } catch (e) {}
+  } catch (e) {}
+  return false;
 }
 
 function parseMacApp(appPath, idCounter) {
@@ -504,10 +724,12 @@ function parseMacApp(appPath, idCounter) {
 
     let isElectron = false;
 
+    // Check 1: Bundle ID contains electron
     if (/electron/i.test(bundleId)) {
       isElectron = true;
     }
 
+    // Check 2: .asar files in Resources
     if (!isElectron) {
       const resourcesDir = path.join(appPath, 'Contents', 'Resources');
       if (fs.existsSync(resourcesDir)) {
@@ -519,6 +741,7 @@ function parseMacApp(appPath, idCounter) {
       }
     }
 
+    // Check 3: Electron Framework fingerprint
     if (!isElectron) {
       const frameworksDir = path.join(appPath, 'Contents', 'Frameworks');
       if (fs.existsSync(frameworksDir)) {
@@ -530,10 +753,7 @@ function parseMacApp(appPath, idCounter) {
             if (!fs.existsSync(currentPath)) continue;
             try {
               const subs = fs.readdirSync(currentPath);
-              const hasHelpers = subs.includes('Helpers');
-              const hasLibraries = subs.includes('Libraries');
-              const hasResources = subs.includes('Resources');
-              if (hasHelpers && hasLibraries && hasResources) {
+              if (subs.includes('Helpers') && subs.includes('Libraries') && subs.includes('Resources')) {
                 isElectron = true;
                 break;
               }
@@ -543,55 +763,26 @@ function parseMacApp(appPath, idCounter) {
       }
     }
 
+    // Check 4: Binary contains Electron strings (consistent with Linux approach)
+    if (!isElectron) {
+      isElectron = checkMacBinaryIsElectron(appPath);
+    }
+
     if (!isElectron) return null;
 
-    idCounter.val++;
-    const isRunning = checkIfAppRunning(bundleId || name);
-    
+    // Return info without id/running status; final assembly happens in scanLocalElectronApps
     return {
-      id: 'app_' + idCounter.val,
       name: name,
       path: appPath,
       version: version,
       bundleId: bundleId,
-      isElectron: true,
-      isRunning: isRunning,
-      pid: isRunning ? findAppPid(bundleId || name) : 0,
-      icon: null,
     };
   } catch (e) {
     return null;
   }
 }
 
-async function parseWinApp(fullPath, entry, idCounter) {
-  try {
-    const electronExePath = path.join(fullPath, 'electron.exe');
-    const isElectron = fs.existsSync(electronExePath);
-    if (!isElectron) return null;
-
-    const stats = fs.statSync(fullPath);
-    if (!stats.isDirectory()) return null;
-
-    idCounter.val++;
-    const name = entry.replace(/\.exe$/i, '') || path.basename(fullPath);
-    const isRunning = checkIfAppRunning(name);
-    
-    return {
-      id: 'app_' + idCounter.val,
-      name: name,
-      path: fullPath,
-      version: '',
-      bundleId: name,
-      isElectron: true,
-      isRunning: isRunning,
-      pid: isRunning ? findAppPid(name) : 0,
-      icon: null,
-    };
-  } catch (e) {
-    return null;
-  }
-}
+// ====== Linux: 解析 .desktop 文件 ======
 
 async function parseLinuxDesktopEntry(desktopPath, idCounter) {
   try {
@@ -602,27 +793,46 @@ async function parseLinuxDesktopEntry(desktopPath, idCounter) {
 
     const execLine = execMatch[1].replace(/%[fFuUdDnNickvm]/g, '').trim();
     const name = nameMatch ? nameMatch[1] : path.basename(desktopPath, '.desktop');
-    
-    if (!execLine.toLowerCase().includes('electron')) return null;
 
-    idCounter.val++;
-    const isRunning = checkIfAppRunning(name);
-    
+    // Method 1: Direct "electron" substring in Exec line
+    let isElectron = execLine.toLowerCase().includes('electron');
+
+    // Method 2: Resolve binary path and check the actual binary
+    if (!isElectron) {
+      const binaryPath = extractBinaryPath(execLine);
+      if (binaryPath) {
+        let resolvedPath = binaryPath;
+        try {
+          if (fs.existsSync(binaryPath)) {
+            resolvedPath = fs.realpathSync(binaryPath);
+          }
+        } catch (e) {}
+        isElectron = checkBinaryIsElectron(resolvedPath);
+      }
+    }
+
+    // Method 3: Check desktop file patterns
+    if (!isElectron) {
+      const wmClassMatch = content.match(/^StartupWMClass=(.+)$/m);
+      if (wmClassMatch && /electron|chrome|chromium/i.test(wmClassMatch[1])) {
+        isElectron = true;
+      }
+    }
+
+    if (!isElectron) return null;
+
     return {
-      id: 'app_' + idCounter.val,
       name: name,
       path: execLine,
       version: '',
       bundleId: name,
-      isElectron: true,
-      isRunning: isRunning,
-      pid: isRunning ? findAppPid(name) : 0,
-      icon: null,
     };
   } catch (e) {
     return null;
   }
 }
+
+// ====== 跨平台：进程检测 ======
 
 function checkIfAppRunning(identifier) {
   try {
@@ -636,40 +846,212 @@ function checkIfAppRunning(identifier) {
 function findAppPid(identifier) {
   try {
     const platform = process.platform;
-    if (platform === 'darwin') {
-      const result = execSync(`pgrep -f "${identifier}" 2>/dev/null || echo "0"`, { encoding: 'utf8' });
+    if (platform === 'darwin' || platform === 'linux') {
+      const result = execSync(`pgrep -f "${identifier}" 2>/dev/null || echo "0"`, { encoding: 'utf8', timeout: 3000 });
       const pids = result.trim().split('\n').filter(p => p).map(Number).filter(p => p > 0 && p !== process.pid);
       return pids.length > 0 ? pids[0] : 0;
     } else if (platform === 'win32') {
+      const safeName = identifier.replace(/[\\"'$`]/g, '');
       try {
-        const result = execSync(`tasklist /FI "IMAGENAME eq ${identifier}.exe" 2>nul | find /i "${identifier}"`, { encoding: 'utf8', timeout: 3000 });
+        const result = execSync(`wmic process where "name like '%${safeName}%'" get ProcessId 2>nul`, { encoding: 'utf8', timeout: 5000 });
+        const lines = result.split(/\r?\n/).filter(l => /^\s*\d+\s*$/.test(l.trim()));
+        for (const line of lines) {
+          const pid = parseInt(line.trim());
+          if (pid > 0 && pid !== process.pid) return pid;
+        }
+      } catch (e) {}
+      try {
+        const result = execSync(`tasklist /FI "IMAGENAME eq ${safeName}.exe" 2>nul`, { encoding: 'utf8', timeout: 3000 });
         const match = result.match(/\b\d+\b/);
-        return match ? parseInt(match[0]) : 0;
-      } catch (e) {
-        return 0;
-      }
-    } else {
-      const result = execSync(`pgrep -f "${identifier}" 2>/dev/null || echo "0"`, { encoding: 'utf8' });
-      const pids = result.trim().split('\n').filter(p => p).map(Number).filter(p => p > 0 && p !== process.pid);
-      return pids.length > 0 ? pids[0] : 0;
+        if (match) {
+          const pid = parseInt(match[0]);
+          if (pid > 0 && pid !== process.pid) return pid;
+        }
+      } catch (e) {}
+      return 0;
     }
+    return 0;
   } catch (e) {
     return 0;
   }
 }
 
-async function launchAppWithDebugging(appPath, port) {
-  try {
-    const profileDir = path.join(os.tmpdir(), `sap-cdp-profile-${port}`);
-    try { fs.mkdirSync(profileDir, { recursive: true }); } catch (e) {}
+// ====== 主扫描函数 ======
 
+async function scanLocalElectronApps() {
+  const platform = process.platform;
+  const appsMap = new Map();
+  const idCounter = { val: 0 };
+
+  function addApp(info) {
+    const key = normalizePathForDedup(info.path);
+    const existing = appsMap.get(key);
+    if (existing) {
+      const isInstaller = /uninstall|install|update|setup|remove|repair|config/i;
+      if (info.version && !existing.version) {
+        appsMap.set(key, { ...existing, version: info.version, name: info.name || existing.name });
+      } else if (existing.exeName && isInstaller.test(existing.exeName) && info.exeName && !isInstaller.test(info.exeName)) {
+        // Existing entry points to installer binary; replace with app's real exe
+        appsMap.set(key, { ...existing, name: info.name, exeName: info.exeName });
+      }
+      return;
+    }
+    appsMap.set(key, info);
+  }
+
+  if (platform === 'darwin') {
+    const macPaths = ['/Applications', '/System/Applications'];
+    try { macPaths.push(path.join(os.homedir(), 'Applications')); } catch (e) {}
+
+    // 扫描 Homebrew Caskroom 目录
+    for (const brewPrefix of ['/opt/homebrew/Caskroom', '/usr/local/Caskroom']) {
+      if (!fs.existsSync(brewPrefix)) continue;
+      try {
+        const caskDirs = fs.readdirSync(brewPrefix);
+        for (const d of caskDirs) {
+          const caskPath = path.join(brewPrefix, d);
+          if (!fs.existsSync(caskPath)) continue;
+          let caskStat;
+          try { caskStat = fs.statSync(caskPath); } catch (e) { continue; }
+          if (!caskStat.isDirectory()) continue;
+          try {
+            const versions = fs.readdirSync(caskPath);
+            for (const v of versions) {
+              const vPath = path.join(caskPath, v);
+              if (!fs.existsSync(vPath)) continue;
+              let vStat;
+              try { vStat = fs.statSync(vPath); } catch (e) { continue; }
+              if (!vStat.isDirectory()) {
+                if (v.endsWith('.app')) {
+                  const appInfo = parseMacApp(vPath, idCounter);
+                  if (appInfo) addApp(appInfo);
+                }
+                continue;
+              }
+              try {
+                const contents = fs.readdirSync(vPath);
+                for (const item of contents) {
+                  if (item.endsWith('.app')) {
+                    const appInfo = parseMacApp(path.join(vPath, item), idCounter);
+                    if (appInfo) addApp(appInfo);
+                  }
+                }
+              } catch (e) {}
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
+    for (const dir of macPaths) {
+      if (!fs.existsSync(dir)) continue;
+      try {
+        const entries = fs.readdirSync(dir);
+        for (const entry of entries) {
+          if (!entry.endsWith('.app')) continue;
+          const appInfo = parseMacApp(path.join(dir, entry), idCounter);
+          if (appInfo) addApp(appInfo);
+        }
+      } catch (e) {
+        console.error('[LocalAppControl] 读取目录失败:', dir, e.message);
+      }
+    }
+  } else if (platform === 'win32') {
+    // Yield helper: periodically release main thread to prevent UI freezing
+    let opCount = 0;
+    const yield_ = async () => {
+      if (++opCount % 10 === 0) await new Promise(r => setTimeout(r, 0));
+    };
+
+    console.log('[LocalAppControl] 开始扫描开始菜单...');
+    await scanWinStartMenu(addApp, yield_);
+    console.log('[LocalAppControl] 开始菜单扫描完成，已发现 ' + appsMap.size + ' 个应用');
+
+    // Quick check: %LOCALAPPDATA%\Programs (few entries, catches portable/squirrel installs)
+    try {
+      const localProgs = path.join(os.homedir(), 'AppData', 'Local', 'Programs');
+      if (fs.existsSync(localProgs)) {
+        await yield_();
+        const entries = fs.readdirSync(localProgs);
+        for (const entry of entries) {
+          await yield_();
+          const fullPath = path.join(localProgs, entry);
+          if (!fs.existsSync(fullPath)) continue;
+          try { if (!fs.statSync(fullPath).isDirectory()) continue; } catch (e) { continue; }
+          if (!quickElectronCheck(fullPath)) continue;
+          if (!findElectronExe(fullPath)) continue;
+          addApp({
+            name: entry.replace(/\.exe$/i, ''),
+            path: fullPath,
+            version: '',
+            bundleId: entry,
+          });
+        }
+      }
+    } catch (e) {}
+  } else {
+    const desktopDirs = [
+      '/usr/share/applications',
+      '/usr/local/share/applications',
+      '/var/lib/snapd/desktop/applications',
+      '/var/lib/flatpak/exports/share/applications',
+    ];
+    try { desktopDirs.push(path.join(os.homedir(), '.local', 'share', 'applications')); } catch (e) {}
+    try { desktopDirs.push(path.join(os.homedir(), '.local', 'share', 'flatpak', 'exports', 'share', 'applications')); } catch (e) {}
+
+    console.log('[LocalAppControl] 开始扫描 Linux 桌面文件...');
+    let linuxCount = 0;
+    for (const dir of desktopDirs) {
+      if (!fs.existsSync(dir)) continue;
+      try {
+        const entries = fs.readdirSync(dir);
+        for (const entry of entries) {
+          if (!entry.endsWith('.desktop')) continue;
+          const appInfo = await parseLinuxDesktopEntry(path.join(dir, entry), idCounter);
+          if (appInfo) { addApp(appInfo); linuxCount++; }
+        }
+      } catch (e) {
+        console.error('[LocalAppControl] 读取目录失败:', dir, e.message);
+      }
+    }
+    console.log('[LocalAppControl] Linux 桌面文件扫描完成，发现 ' + linuxCount + ' 个候选应用');
+  }
+
+  const apps = [];
+  for (const [key, info] of appsMap) {
+    idCounter.val++;
+    const pidId = info.exeName || info.name;
+    const isRunning = checkIfAppRunning(pidId);
+    apps.push({
+      id: 'app_' + idCounter.val,
+      name: info.name,
+      path: info.path,
+      version: info.version || '',
+      bundleId: info.bundleId || info.name,
+      isElectron: true,
+      isRunning: isRunning,
+      pid: isRunning ? findAppPid(pidId) : 0,
+      icon: null,
+    });
+  }
+
+  console.log('[LocalAppControl] 扫描完成，共发现 ' + apps.length + ' 个 Electron 应用');
+  return apps;
+}
+
+async function launchAppWithDebugging(appPath, port, forceNewInstance) {
+  try {
+    let profileDir = null;
     const debugArgs = [
       `--remote-debugging-port=${port}`,
       '--remote-debugging-address=127.0.0.1',
-      `--user-data-dir=${profileDir}`,
-      '--no-first-run',
-      '--no-default-browser-check',
     ];
+    if (forceNewInstance !== false) {
+      profileDir = path.join(os.tmpdir(), `sap-cdp-profile-${port}`);
+      try { fs.mkdirSync(profileDir, { recursive: true }); } catch (e) {}
+      debugArgs.push(`--user-data-dir=${profileDir}`);
+    }
+    debugArgs.push('--no-first-run', '--no-default-browser-check');
 
     let child;
     if (process.platform === 'darwin' && appPath.endsWith('.app')) {
@@ -679,6 +1061,34 @@ async function launchAppWithDebugging(appPath, port) {
       child = spawn('open', openArgs, { detached: true, stdio: 'ignore' });
     } else {
       let execPath = appPath;
+
+      // Windows: appPath may be a directory (from start menu scan) or missing .exe; resolve to actual exe
+      if (process.platform === 'win32') {
+        // Try .exe extension if path doesn't exist directly
+        if (!fs.existsSync(appPath) && !appPath.toLowerCase().endsWith('.exe') && fs.existsSync(appPath + '.exe')) {
+          execPath = appPath + '.exe';
+        }
+        try {
+          const s = fs.statSync(execPath);
+          if (s.isDirectory()) {
+            const found = findElectronExe(execPath);
+            if (found) {
+              try {
+                if (fs.statSync(found).isFile()) { execPath = found; }
+              } catch (e) {}
+            }
+            if (execPath === appPath || (fs.existsSync(execPath) && fs.statSync(execPath).isDirectory())) {
+              // findElectronExe returned a directory; scan for any .exe inside
+              const entries = fs.readdirSync(execPath);
+              const skip = /uninstall|update|setup|crashpad|notifier/i;
+              let exe = entries.find(f => f.toLowerCase().endsWith('.exe') && !skip.test(f));
+              if (!exe) exe = entries.find(f => f.toLowerCase().endsWith('.exe'));
+              if (exe) execPath = path.join(execPath, exe);
+            }
+          }
+        } catch (e) {}
+      }
+
       if (process.platform === 'darwin' && appPath.endsWith('.app')) {
         const macosDir = path.join(appPath, 'Contents', 'MacOS');
         if (fs.existsSync(macosDir)) {
@@ -744,13 +1154,25 @@ async function quitAppProcess(pid, appPath) {
     }
 
     if (pid && pid > 0) {
-      try { process.kill(pid, 'SIGTERM'); } catch (e) {}
-      await new Promise(r => setTimeout(r, 1000));
-      try { process.kill(pid, 'SIGKILL'); } catch (e) {}
-    } else if (appPath) {
-      const identifier = path.basename(appPath, '.app');
-      try { execSync(`pkill -9 -f "${identifier}" 2>/dev/null || true`, { timeout: 3000 }); } catch (e) {}
+      // Windows: use taskkill for proper process termination
+      if (platform === 'win32') {
+        try { execSync(`taskkill /PID ${pid} /F 2>nul`, { timeout: 5000 }); } catch (e) {}
+      } else {
+        try { process.kill(pid, 'SIGTERM'); } catch (e) {}
+        await new Promise(r => setTimeout(r, 1000));
+        try { process.kill(pid, 'SIGKILL'); } catch (e) {}
+      }
     }
+    // Also try name-based kill (handles stale PIDs or PID=0 from scan)
+    if (appPath) {
+      const identifier = path.basename(appPath, '.app').replace(/\.exe$/i, '');
+      if (platform === 'win32') {
+        try { execSync(`taskkill /FI "IMAGENAME eq *${identifier}*" /F 2>nul`, { timeout: 5000 }); } catch (e) {}
+      } else if (platform !== 'darwin') {
+        try { execSync(`pkill -9 -f "${identifier}" 2>/dev/null || true`, { timeout: 3000 }); } catch (e) {}
+      }
+    }
+    if (platform === 'win32') await new Promise(r => setTimeout(r, 1000));
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -1608,9 +2030,9 @@ app.whenReady().then(async () => {
       }
     });
 
-    ipcMain.handle('launch-app-with-debugging', async (event, { path: appPath, port }) => {
+    ipcMain.handle('launch-app-with-debugging', async (event, { path: appPath, port, forceNewInstance }) => {
       try {
-        const result = await launchAppWithDebugging(appPath, port);
+        const result = await launchAppWithDebugging(appPath, port, forceNewInstance);
         return result;
       } catch (e) {
         console.error('[LocalAppControl] 启动失败:', e);

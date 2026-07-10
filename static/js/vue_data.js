@@ -459,6 +459,7 @@ let vue_data = {
     localAppControlSettings: {
       enabled: false,
       browserVision: false,
+      forceNewInstance: false,
       scannedApps: [],
       connectedApps: {},
       nextPort: 9223,

@@ -125,6 +125,17 @@ async def call_vue_method(method_name, args_list=None):
     for attempt in range(max_retries):
         # 每次重试都重新连接 WebSocket，防止 WS 链接本身断开
         try:
+            # 前置检查：确保 window.aiBrowser 已初始化
+            if attempt == 0:
+                check_res = await cdp_command(ws_url, "Runtime.evaluate", {
+                    "expression": "typeof window.aiBrowser !== 'undefined'",
+                    "returnByValue": True
+                })
+                check_value = check_res.get('result', {}).get('value', False)
+                if not check_value:
+                    print(f"[Warn] window.aiBrowser not ready, retrying {method_name}...")
+                    raise ValueError("aiBrowser not initialized")
+
             res = await cdp_command(ws_url, "Runtime.evaluate", {
                 "expression": expression,
                 "returnByValue": True, 
@@ -138,10 +149,17 @@ async def call_vue_method(method_name, args_list=None):
                 if 'exception' in exc and 'description' in exc['exception']:
                     msg = f"{msg}: {exc['exception']['description']}"
                 
-                # ★ 关键：如果遇到 Illegal invocation，抛出异常以触发重试
-                if "Illegal invocation" in msg or "GUEST_VIEW_MANAGER_CALL" in msg:
-                    print(f"[Warn] Retrying {method_name} due to Electron error: {msg}")
-                    raise ValueError("Electron Webview Error") # 触发 except 重试
+                # 可重试的错误：Illegal invocation、GUEST_VIEW_MANAGER_CALL、aiBrowser 未就绪
+                retryable = any(kw in msg for kw in [
+                    "Illegal invocation",
+                    "GUEST_VIEW_MANAGER_CALL",
+                    "Cannot read properties of undefined",
+                    "aiBrowser is not defined",
+                    "aiBrowser is undefined"
+                ])
+                if retryable:
+                    print(f"[Warn] Retrying {method_name} due to error: {msg}")
+                    raise ValueError("Retryable Error")
                 
                 return f"Error executing {method_name}: {msg}"
 
@@ -149,10 +167,17 @@ async def call_vue_method(method_name, args_list=None):
             remote_object = res.get('result', {})
             value = remote_object.get('value', "")
             
-            # 如果返回值是字符串且包含 Electron 内部错误，也视为失败进行重试
-            if isinstance(value, str) and ("Illegal invocation" in value or "GUEST_VIEW_MANAGER_CALL" in value):
+            # 如果返回值是字符串且包含可重试错误，也视为失败进行重试
+            retryable = any(kw in str(value) for kw in [
+                "Illegal invocation",
+                "GUEST_VIEW_MANAGER_CALL",
+                "Cannot read properties of undefined",
+                "aiBrowser is not defined",
+                "aiBrowser is undefined"
+            ])
+            if isinstance(value, str) and retryable:
                 print(f"[Warn] Retrying {method_name} due to JS Result error: {value}")
-                raise ValueError("Electron Webview Error")
+                raise ValueError("Retryable Error")
 
             if 'value' in remote_object:
                 return remote_object['value']
