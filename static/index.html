@@ -1,9 +1,18 @@
 <!DOCTYPE html>
-<html>
+<html class="loading">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Super Agent party</title>
+  <!-- FOUC 防护：在外部 CSS 加载前隐藏 body，避免无样式内容闪烁 -->
+  <style>
+    html.loading body { opacity: 0; }
+    html.loading { background: #ffffff; }
+    html body {
+      opacity: 1;
+      transition: opacity 300ms ease-out;
+    }
+  </style>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/transition.css">
@@ -18893,5 +18902,15 @@ function updateElement(el, rawMarkdown, formatFn) {
   <script src="js/vue_data.js"></script>
   <script src="js/vue_methods.js"></script>
   <script src="js/renderer.js"></script>
+  <script>
+    function onReady() {
+      document.documentElement.classList.remove('loading');
+    }
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      onReady();
+    } else {
+      document.addEventListener('DOMContentLoaded', onReady);
+    }
+  </script>
 </body>
 </html>
