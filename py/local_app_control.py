@@ -617,6 +617,8 @@ def _scan_linux_desktop_entries(known_paths: set, search_paths: list) -> list:
     ]
     if os.path.exists("/var/lib/snapd/desktop/applications"):
         desktop_dirs.append("/var/lib/snapd/desktop/applications")
+    if os.path.exists("/var/lib/flatpak/exports/share/applications"):
+        desktop_dirs.append("/var/lib/flatpak/exports/share/applications")
 
     results = []
 
@@ -877,11 +879,10 @@ def scan_local_apps(search_paths: Optional[List[str]] = None) -> List[dict]:
         elif mapped == "linux":
             search_paths = [
                 "/opt",
-                "/usr/lib",
                 "/snap",
-                os.path.expanduser("~/.local/share"),
-                os.path.expanduser("~/Applications"),
+                os.path.expanduser("~/Apps"),
             ]
+            # /usr/lib 和 ~/.local/share 由 .desktop 扫描覆盖，避免 os.walk 遍历数千个共享库目录
         else:
             raise NotImplementedError(f"Platform {mapped} not supported")
 
@@ -1018,6 +1019,32 @@ def scan_local_apps(search_paths: Optional[List[str]] = None) -> List[dict]:
                 elif p.name.endswith(".app"):
                     if not version:
                         name = p.stem
+            elif mapped == "linux":
+                try:
+                    # 尝试从 Electron 应用的 package.json 获取名称和版本
+                    app_dir = p.parent
+                    pkg_candidates = [
+                        app_dir / "resources" / "app" / "package.json",
+                        app_dir / "package.json",
+                        app_dir / "resources" / "package.json",
+                    ]
+                    for pkg_path in pkg_candidates:
+                        if pkg_path.exists():
+                            try:
+                                import json
+                                pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                                pkg_name = pkg.get("productName") or pkg.get("name") or ""
+                                if pkg_name and "electron" not in pkg_name.lower():
+                                    name = pkg_name
+                                pkg_ver = pkg.get("version") or ""
+                                if pkg_ver:
+                                    version = pkg_ver
+                                if name != app_dir.name and version:
+                                    break
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
             # 清洗 ProductName 中的 Launcher/启动器 后缀（飞书的 ProductName 是 "Feishu Launcher"）
             nl = name.lower()
