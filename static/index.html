@@ -3465,7 +3465,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             :placeholder="t('addMemoryEntry') || '输入新的记忆内容…'"
                             style="flex:1"
                           ></el-input>
-                          <el-button type="primary" :disabled="!newVectorText.trim()" @click="addVectorRow">
+                          <el-button type="primary" :disabled="!(newVectorText || '').trim()" @click="addVectorRow">
                             <i class="fa-solid fa-plus"></i> {{ t('add') || '添加' }}
                           </el-button>
                         </div>

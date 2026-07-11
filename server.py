@@ -11660,20 +11660,27 @@ class TextUpdate(BaseModel):
 # ---------- 1. 列出所有记忆条目 ----------
 @app.get("/memory/{memory_id}")
 async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
-    config = await _get_m0_config_for_memory(memory_id)
-    from mem0 import Memory
-    m0 = Memory.from_config(config)
-    results = await asyncio.to_thread(m0.get_all, user_id=memory_id, limit=10000)
-    flat = []
-    for item in (results or []):
-        flat.append({
-            "idx": len(flat),
-            "uuid": item.get("id", ""),
-            "text": item.get("memory", ""),
-            "created_at": fmt_iso8605_to_local(item.get("created_at", "")),
-            "timetamp": fmt_iso8605_to_local(item.get("updated_at", item.get("created_at", ""))),
-        })
-    return flat
+    try:
+        config = await _get_m0_config_for_memory(memory_id)
+        from mem0 import Memory
+        m0 = Memory.from_config(config)
+        results = await asyncio.to_thread(m0.get_all, user_id=memory_id, limit=10000)
+        flat = []
+        for item in (results or []):
+            flat.append({
+                "idx": len(flat),
+                "uuid": item.get("id", ""),
+                "text": item.get("memory", ""),
+                "created_at": fmt_iso8605_to_local(item.get("created_at", "")),
+                "timetamp": fmt_iso8605_to_local(item.get("updated_at", item.get("created_at", ""))),
+            })
+        return flat
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------- 2. 新增记忆条目 ----------
