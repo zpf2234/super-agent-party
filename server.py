@@ -11565,74 +11565,6 @@ from py.overlay_router import router as overlay_router
 app.include_router(overlay_router)
 
 # ---------- 工具 ----------
-# 每个 memory_id 一把锁，防止并发读写 faiss+pkl 文件时出现数据不一致
-_memory_locks = {}
-_memory_lock_lock = threading.Lock()
-
-def _get_memory_lock(mid: str) -> threading.Lock:
-    """获取 memory_id 对应的锁（不存在则创建），线程安全"""
-    if mid not in _memory_locks:
-        with _memory_lock_lock:
-            if mid not in _memory_locks:
-                _memory_locks[mid] = threading.Lock()
-    return _memory_locks[mid]
-
-def get_dir(mid: str) -> str:
-    return os.path.join(MEMORY_CACHE_DIR, mid)
-
-def get_faiss_path(mid: str) -> str:
-    return os.path.join(get_dir(mid), "agent-party.faiss")
-
-def get_pkl_path(mid: str) -> str:
-    return os.path.join(get_dir(mid), "agent-party.pkl")
-
-def load_index_and_meta(mid: str):
-    import faiss
-    with _get_memory_lock(mid):
-        fpath, ppath = get_faiss_path(mid), get_pkl_path(mid)
-        if not (os.path.exists(fpath) and os.path.exists(ppath)):
-            raise HTTPException(status_code=404, detail="memory not found")
-        index = faiss.read_index(fpath)
-        with open(ppath, "rb") as f:
-            raw = pickle.load(f)
-        # mem0 格式: (docstore_dict, index_to_id_dict)
-        if isinstance(raw, tuple) and len(raw) == 2 and isinstance(raw[0], dict):
-            docstore, idx2id = raw
-            meta_dict = {}
-            for idx in sorted(idx2id.keys()):
-                vid = idx2id[idx]
-                payload = docstore.get(vid, {})
-                meta_dict[vid] = {
-                    "data": payload.get("data", ""),
-                    "created_at": payload.get("created_at", ""),
-                    "timetamp": payload.get("updated_at", payload.get("created_at", "")),
-                }
-        elif isinstance(raw, dict):
-            meta_dict = raw
-        else:
-            meta_dict = {}
-    return index, meta_dict
-
-def save_index_and_meta(mid: str, index, meta: Dict[str, Any]):
-    import faiss
-    with _get_memory_lock(mid):
-        faiss.write_index(index, get_faiss_path(mid))
-        # mem0 兼容格式: (docstore, index_to_id)
-        docstore = {}
-        idx2id = {}
-        for idx, (vid, rec) in enumerate(meta.items()):
-            data_text = rec.get("data", "")
-            docstore[vid] = {
-                "data": data_text,
-                "hash": hashlib.md5(data_text.encode()).hexdigest(),
-                "created_at": rec.get("created_at", ""),
-                "updated_at": rec.get("timetamp", rec.get("created_at", "")),
-            }
-            idx2id[idx] = vid
-        with open(get_pkl_path(mid), "wb") as f:
-            pickle.dump((docstore, idx2id), f)
-
-
 def _sanitize_card_strings(memory: dict) -> None:
     """防御性清理：移除角色卡文本字段中的控制字符（保留 \\n \\r \\t），防止破坏 API 请求"""
     import re
@@ -11662,104 +11594,116 @@ def fmt_iso8605_to_local(iso: str) -> str:
         return iso        # 解析失败就原样返回
 
 
-def flatten_records(meta: Dict[str, Any]) -> List[Dict[str, Any]]:
-    flat = []
-    for uuid, rec in meta.items():
-        flat.append({
-            "idx"        : len(flat),
-            "uuid"       : uuid,
-            "text"       : rec["data"],
-            "created_at" : fmt_iso8605_to_local(rec["created_at"]),
-            "timetamp"   : rec["timetamp"],
-        })
-    return flat
+async def _get_m0_config_for_memory(memory_id: str):
+    """根据 memory_id 获取 mem0 配置，失败抛出 HTTPException"""
+    from py.get_setting import load_settings
+    settings_data = await load_settings()
+    mems = settings_data.get("memories") or []
+    cur_memory = None
+    for m in mems:
+        if m.get("id") == memory_id:
+            cur_memory = m
+            break
+    if not cur_memory:
+        raise HTTPException(status_code=404, detail="memory config not found")
+    if not cur_memory.get("providerId"):
+        raise HTTPException(status_code=400, detail="memory has no embedding provider configured")
 
+    _effective_dims = cur_memory.get("embedding_dims", 1024)
+    _faiss_path = os.path.join(MEMORY_CACHE_DIR, memory_id, "agent-party.faiss")
+    if os.path.exists(_faiss_path):
+        try:
+            import faiss
+            _existing = faiss.read_index(_faiss_path)
+            if _existing.d != _effective_dims:
+                print(f"[WARNING] stored dims({_effective_dims}) != faiss actual dims({_existing.d})，以实际维度为准")
+            _effective_dims = _existing.d
+        except Exception as e:
+            print(f"[WARNING] 无法读取已有 faiss 索引维度: {e}")
 
-# 新增： dict ↔ list 互转工具
-def dict_to_list(meta: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """有序化，保证顺序与 Faiss 索引一致"""
-    return [{uuid: rec} for uuid, rec in meta.items()]
+    config = {
+        "embedder": {
+            "provider": "openai",
+            "config": {
+                "model": cur_memory["model"],
+                "api_key": cur_memory["api_key"],
+                "openai_base_url": cur_memory.get("base_url", ""),
+                "embedding_dims": _effective_dims,
+            },
+        },
+        "llm": {
+            "provider": "openai",
+            "config": {
+                "model": settings_data.get("model", ""),
+                "api_key": settings_data.get("api_key", ""),
+                "openai_base_url": settings_data.get("base_url", ""),
+            },
+        },
+        "vector_store": {
+            "provider": "faiss",
+            "config": {
+                "collection_name": "agent-party",
+                "path": os.path.join(MEMORY_CACHE_DIR, memory_id),
+                "distance_strategy": "euclidean",
+                "embedding_model_dims": _effective_dims,
+            },
+        },
+    }
+    return config
 
-def list_to_dict(meta_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """列表再压回 dict"""
-    new_meta = {}
-    for item in meta_list:
-        uuid, rec = next(iter(item.items()))
-        new_meta[uuid] = rec
-    return new_meta
 
 # ---------- 模型 ----------
 class TextUpdate(BaseModel):
     new_text: str
 
-# ---------- 1. 读取（平铺） ----------
+
+# ---------- 1. 列出所有记忆条目 ----------
 @app.get("/memory/{memory_id}")
 async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
-    _, meta_dict = load_index_and_meta(memory_id)   # 拆包
-    return flatten_records(meta_dict)               # 传字典
-
-# ---------- 2. 修改（只改 data） ----------
-@app.put("/memory/{memory_id}/{idx}")
-async def update_text(
-    memory_id: str,
-    idx: int,
-    body: TextUpdate = Body(...)
-) -> dict:
-    index, meta_dict = load_index_and_meta(memory_id)
-    meta_list = dict_to_list(meta_dict)
-    if not (0 <= idx < len(meta_list)):
-        raise HTTPException(status_code=404, detail="index out of range")
-    # 定位 → 改 data
-    uuid, rec = next(iter(meta_list[idx].items()))
-    rec["data"] = body.new_text
-    # 写回
-    save_index_and_meta(memory_id, index, list_to_dict(meta_list))
-    return {"message": "updated", "idx": idx}
+    config = await _get_m0_config_for_memory(memory_id)
+    from mem0 import Memory
+    m0 = Memory.from_config(config)
+    results = await asyncio.to_thread(m0.get_all, user_id=memory_id, limit=10000)
+    flat = []
+    for item in (results or []):
+        flat.append({
+            "idx": len(flat),
+            "uuid": item.get("id", ""),
+            "text": item.get("memory", ""),
+            "created_at": fmt_iso8605_to_local(item.get("created_at", "")),
+            "timetamp": fmt_iso8605_to_local(item.get("updated_at", item.get("created_at", ""))),
+        })
+    return flat
 
 
-# ---------- 3. 删除（按行号） ----------
-@app.delete("/memory/{memory_id}/{idx}")
-async def delete_text(memory_id: str, idx: int) -> dict:
-    import faiss
-    import numpy as np
-    index, meta_dict = load_index_and_meta(memory_id)
-    meta_list = dict_to_list(meta_dict)
-    if not (0 <= idx < len(meta_list)):
-        raise HTTPException(status_code=404, detail="index out of range")
+# ---------- 2. 新增记忆条目 ----------
+@app.post("/memory/{memory_id}")
+async def add_text(memory_id: str, body: TextUpdate = Body(...)) -> dict:
+    config = await _get_m0_config_for_memory(memory_id)
+    from mem0 import Memory
+    m0 = Memory.from_config(config)
+    await asyncio.to_thread(m0.add, body.new_text, user_id=memory_id, infer=False)
+    return {"message": "added"}
 
-    ntotal = index.ntotal
-    print("index.ntotal",index.ntotal)
-    print("len(meta_list)",len(meta_list))
 
-    # 容错：修复并发写入或异常关机导致的两边数据不一致
-    if ntotal != len(meta_list):
-        reconciled = min(ntotal, len(meta_list))
-        print(f"[WARNING] delete_text: index.ntotal({ntotal}) != len(meta_list)({len(meta_list)}), "
-              f"auto-reconciling to {reconciled}")
-        if ntotal > len(meta_list):
-            # faiss 向量比 pickle 记录多：以 pickle 为准，截断向量
-            ntotal = len(meta_list)
-        else:
-            # pickle 记录比 faiss 向量多：截断 meta_list
-            meta_list = meta_list[:ntotal]
+# ---------- 3. 修改记忆内容 ----------
+@app.put("/memory/{memory_id}/{uuid}")
+async def update_text(memory_id: str, uuid: str, body: TextUpdate = Body(...)) -> dict:
+    config = await _get_m0_config_for_memory(memory_id)
+    from mem0 import Memory
+    m0 = Memory.from_config(config)
+    await asyncio.to_thread(m0.update, memory_id=uuid, data=body.new_text)
+    return {"message": "updated", "uuid": uuid}
 
-        if idx >= len(meta_list):
-            raise HTTPException(status_code=400,
-                detail="index out of range after auto-repair. Please refresh and retry.")
 
-    # 1. 重建 Faiss 索引（去掉 idx）
-    ids_to_keep = [i for i in range(ntotal) if i != idx]
-    vecs = np.vstack([index.reconstruct(i) for i in range(ntotal)])
-    new_index = faiss.IndexFlatL2(index.d)
-    if ids_to_keep:
-        new_index.add(vecs[np.array(ids_to_keep, dtype=np.int64)].astype("float32"))
-
-    # 2. 删除列表元素
-    del meta_list[idx]
-
-    # 3. 落盘
-    save_index_and_meta(memory_id, new_index, list_to_dict(meta_list))
-    return {"message": "deleted", "idx": idx}
+# ---------- 4. 删除记忆条目 ----------
+@app.delete("/memory/{memory_id}/{uuid}")
+async def delete_text(memory_id: str, uuid: str) -> dict:
+    config = await _get_m0_config_for_memory(memory_id)
+    from mem0 import Memory
+    m0 = Memory.from_config(config)
+    await asyncio.to_thread(m0.delete, memory_id=uuid)
+    return {"message": "deleted", "uuid": uuid}
 
 @app.post("/api/update_proxy") # 建议改用 POST 表达状态变更
 async def update_proxy():
