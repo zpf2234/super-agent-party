@@ -7127,6 +7127,13 @@ formatMessage(content, index) {
           }
 
           const { dims } = await resp.json();
+          // 编辑时维度变化警告：更换 provider/model 可能导致已有记忆与 faiss 维度不匹配
+          if (this.newMemory.id && oldMemory && oldMemory.embedding_dims && dims !== oldMemory.embedding_dims) {
+            showNotification(
+              `${this.t('embeddingDimsChanged') || 'Embedding dimension changed'}: ${oldMemory.embedding_dims} → ${dims}. ${this.t('existingMemoriesPreserved') || 'Existing memories are preserved but may need re-vectorization.'}`,
+              'warning'
+            );
+          }
           memory.embedding_dims = dims;
           await this.autoSaveSettings();          // 真正落盘
         } catch (e) {
@@ -16652,11 +16659,19 @@ clearSegments() {
     // 新增记忆
     async addVectorRow() {
       if (!this.newVectorText.trim()) return
+      this.vectorLoading = true
       try {
         const mid = this.vectorDialogMemoryId
         const res = await fetch(`/memory/${mid}`, {
-          
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_text: this.newVectorText.trim() })
         })
+        if (!res.ok) throw new Error(await res.text())
+        this.newVectorText = ''
+        await this.loadVectorTable(mid)
+      } catch (e) {
+        showNotification(e.message, 'error')
       } finally {
         this.vectorLoading = false
       }
@@ -16664,7 +16679,7 @@ clearSegments() {
 
   startEditRow(tableIndex) {
     const row = this.vectorTable[tableIndex]
-    this.editRowIdx = row.idx
+    this.editRowUuid = row.uuid
     this.editRowText = row.text
     this.editRowVisible = true
   },
@@ -16672,7 +16687,7 @@ clearSegments() {
     if (!this.editRowText.trim()) return
     try {
       const mid = this.vectorDialogMemoryId
-      const res = await fetch(`/memory/${mid}/${this.editRowIdx}`, {
+      const res = await fetch(`/memory/${mid}/${this.editRowUuid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_text: this.editRowText.trim() })
@@ -16684,10 +16699,12 @@ clearSegments() {
       showNotification(e.message, 'error')
     }
   },
-  async deleteVectorRow(idx) {
+  async deleteVectorRow(rowIndex) {
+    const uuid = this.vectorTable[rowIndex]?.uuid
+    if (!uuid) return
     try {
       const mid = this.vectorDialogMemoryId
-      const res = await fetch(`/memory/${mid}/${idx}`, { method: 'DELETE' })
+      const res = await fetch(`/memory/${mid}/${uuid}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await res.text())
       await this.loadVectorTable(mid)
     } catch (e) {
