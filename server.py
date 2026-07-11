@@ -11594,17 +11594,43 @@ def load_index_and_meta(mid: str):
             raise HTTPException(status_code=404, detail="memory not found")
         index = faiss.read_index(fpath)
         with open(ppath, "rb") as f:
-            raw = pickle.load(f)          # 可能是 tuple 也可能是 dict
-        # 兼容旧数据：如果是 tuple 取第 0 个，否则直接用
-        meta_dict = raw[0] if isinstance(raw, tuple) else raw
+            raw = pickle.load(f)
+        # mem0 格式: (docstore_dict, index_to_id_dict)
+        if isinstance(raw, tuple) and len(raw) == 2 and isinstance(raw[0], dict):
+            docstore, idx2id = raw
+            meta_dict = {}
+            for idx in sorted(idx2id.keys()):
+                vid = idx2id[idx]
+                payload = docstore.get(vid, {})
+                meta_dict[vid] = {
+                    "data": payload.get("data", ""),
+                    "created_at": payload.get("created_at", ""),
+                    "timetamp": payload.get("updated_at", payload.get("created_at", "")),
+                }
+        elif isinstance(raw, dict):
+            meta_dict = raw
+        else:
+            meta_dict = {}
     return index, meta_dict
 
-def save_index_and_meta(mid: str, index, meta: List[Dict[Any, Any]]):
+def save_index_and_meta(mid: str, index, meta: Dict[str, Any]):
     import faiss
     with _get_memory_lock(mid):
         faiss.write_index(index, get_faiss_path(mid))
+        # mem0 兼容格式: (docstore, index_to_id)
+        docstore = {}
+        idx2id = {}
+        for idx, (vid, rec) in enumerate(meta.items()):
+            data_text = rec.get("data", "")
+            docstore[vid] = {
+                "data": data_text,
+                "hash": hashlib.md5(data_text.encode()).hexdigest(),
+                "created_at": rec.get("created_at", ""),
+                "updated_at": rec.get("timetamp", rec.get("created_at", "")),
+            }
+            idx2id[idx] = vid
         with open(get_pkl_path(mid), "wb") as f:
-            pickle.dump(meta, f)
+            pickle.dump((docstore, idx2id), f)
 
 
 def _sanitize_card_strings(memory: dict) -> None:
