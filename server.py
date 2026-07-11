@@ -3634,6 +3634,18 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             if cur_memory: _sanitize_card_strings(cur_memory)
             if cur_memory and cur_memory["providerId"]:
                 print("长期记忆启用")
+                # 以已有 faiss 索引实际维度为准，防止更换 provider/model 维度不匹配导致数据清空
+                _effective_dims = cur_memory.get("embedding_dims", 1024)
+                _faiss_path = os.path.join(MEMORY_CACHE_DIR, memoryId, "agent-party.faiss")
+                if os.path.exists(_faiss_path):
+                    try:
+                        import faiss
+                        _existing = faiss.read_index(_faiss_path)
+                        if _existing.d != _effective_dims:
+                            print(f"[WARNING] stored dims({_effective_dims}) != faiss actual dims({_existing.d})，以实际维度为准")
+                        _effective_dims = _existing.d
+                    except Exception as e:
+                        print(f"[WARNING] 无法读取已有 faiss 索引维度: {e}")
                 config={
                     "embedder": {
                         "provider": 'openai',
@@ -3641,7 +3653,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             "model": cur_memory['model'],
                             "api_key": cur_memory['api_key'],
                             "openai_base_url":cur_memory["base_url"],
-                            "embedding_dims":cur_memory.get("embedding_dims", 1024)
+                            "embedding_dims":_effective_dims
                         },
                     },
                     "llm": {
@@ -3658,7 +3670,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             "collection_name": "agent-party",
                             "path": os.path.join(MEMORY_CACHE_DIR,memoryId),
                             "distance_strategy": "euclidean",
-                            "embedding_model_dims": cur_memory.get("embedding_dims", 1024)
+                            "embedding_model_dims": _effective_dims
                         }
                     }
                 }
@@ -5932,6 +5944,17 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         if cur_memory: _sanitize_card_strings(cur_memory)
         if cur_memory and cur_memory["providerId"]:
             print("长期记忆启用")
+            _effective_dims = cur_memory.get("embedding_dims", 1024)
+            _faiss_path = os.path.join(MEMORY_CACHE_DIR, memoryId, "agent-party.faiss")
+            if os.path.exists(_faiss_path):
+                try:
+                    import faiss
+                    _existing = faiss.read_index(_faiss_path)
+                    if _existing.d != _effective_dims:
+                        print(f"[WARNING] stored dims({_effective_dims}) != faiss actual dims({_existing.d})，以实际维度为准")
+                    _effective_dims = _existing.d
+                except Exception as e:
+                    print(f"[WARNING] 无法读取已有 faiss 索引维度: {e}")
             config={
                 "embedder": {
                     "provider": 'openai',
@@ -5939,7 +5962,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                         "model": cur_memory['model'],
                         "api_key": cur_memory['api_key'],
                         "openai_base_url":cur_memory["base_url"],
-                        "embedding_dims":cur_memory.get("embedding_dims", 1024)
+                        "embedding_dims":_effective_dims
                     },
                 },
                 "llm": {
@@ -5956,7 +5979,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                         "collection_name": "agent-party",
                         "path": os.path.join(MEMORY_CACHE_DIR,memoryId),
                         "distance_strategy": "euclidean",
-                        "embedding_model_dims": cur_memory.get("embedding_dims", 1024)
+                        "embedding_model_dims": _effective_dims
                     }
                 }
             }

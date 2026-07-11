@@ -7127,6 +7127,13 @@ formatMessage(content, index) {
           }
 
           const { dims } = await resp.json();
+          // 编辑时维度变化警告：更换 provider/model 可能导致已有记忆与 faiss 维度不匹配
+          if (this.newMemory.id && oldMemory && oldMemory.embedding_dims && dims !== oldMemory.embedding_dims) {
+            showNotification(
+              `${this.t('embeddingDimsChanged') || 'Embedding dimension changed'}: ${oldMemory.embedding_dims} → ${dims}. ${this.t('existingMemoriesPreserved') || 'Existing memories are preserved but may need re-vectorization.'}`,
+              'warning'
+            );
+          }
           memory.embedding_dims = dims;
           await this.autoSaveSettings();          // 真正落盘
         } catch (e) {
