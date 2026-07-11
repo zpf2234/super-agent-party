@@ -11676,6 +11676,8 @@ async def _get_m0_config_for_memory(memory_id: str):
                     pickle.dump((docstore, idx2id), f)
                 action = "已迁移" if _needs_migration else "已修复(补充 user_id)"
                 print(f"[INFO] pickle {action}为 mem0 兼容格式: {_ppath}")
+        except Exception as e:
+            print(f"[WARNING] pickle 处理失败: {e}")
 
     config = {
         "embedder": {
