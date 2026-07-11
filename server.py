@@ -11732,7 +11732,7 @@ async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
                 "uuid": item.get("id", ""),
                 "text": item.get("memory", ""),
                 "created_at": fmt_iso8605_to_local(item.get("created_at", "")),
-                "timetamp": fmt_iso8605_to_local(item.get("updated_at", item.get("created_at", ""))),
+                "timetamp": fmt_iso8605_to_local(item.get("updated_at") or item.get("created_at", "")),
             })
         return flat
     except HTTPException:
