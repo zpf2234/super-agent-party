@@ -11621,6 +11621,38 @@ async def _get_m0_config_for_memory(memory_id: str):
         except Exception as e:
             print(f"[WARNING] 无法读取已有 faiss 索引维度: {e}")
 
+    # 确保 pickle 是 mem0 兼容的 (docstore, index_to_id) 元组格式
+    _ppath = os.path.join(MEMORY_CACHE_DIR, memory_id, "agent-party.pkl")
+    if os.path.exists(_ppath):
+        try:
+            with open(_ppath, "rb") as f:
+                _raw = pickle.load(f)
+            if not (isinstance(_raw, tuple) and len(_raw) == 2 and isinstance(_raw[0], dict)):
+                import faiss
+                index = faiss.read_index(_faiss_path)
+                if isinstance(_raw, dict):
+                    meta_for_migration = _raw
+                elif isinstance(_raw, tuple) and isinstance(_raw[0], dict):
+                    meta_for_migration = _raw[0]
+                else:
+                    meta_for_migration = {}
+                docstore = {}
+                idx2id = {}
+                for idx, (vid, rec) in enumerate(meta_for_migration.items()):
+                    data_t = rec.get("data", "") if isinstance(rec, dict) else ""
+                    docstore[vid] = {
+                        "data": data_t,
+                        "hash": hashlib.md5(data_t.encode()).hexdigest(),
+                        "created_at": rec.get("created_at", "") if isinstance(rec, dict) else "",
+                        "updated_at": rec.get("timetamp", rec.get("created_at", "")) if isinstance(rec, dict) else "",
+                    }
+                    idx2id[idx] = vid
+                with open(_ppath, "wb") as f:
+                    pickle.dump((docstore, idx2id), f)
+                print(f"[INFO] pickle 已迁移为 mem0 兼容格式: {_ppath}")
+        except Exception as e:
+            print(f"[WARNING] pickle 迁移失败: {e}")
+
     config = {
         "embedder": {
             "provider": "openai",
