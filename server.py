@@ -11696,10 +11696,12 @@ async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
         config = await _get_m0_config_for_memory(memory_id)
         from mem0 import Memory
         m0 = Memory.from_config(config)
-        results = await asyncio.to_thread(m0.get_all, user_id=memory_id, limit=10000)
-        flat = []
-        for item in (results or []):
-            flat.append({
+    results = await asyncio.to_thread(m0.get_all, user_id=memory_id, limit=10000)
+    # mem0 v1.1+ 返回 {"results": [...]} 格式
+    items = results.get("results", []) if isinstance(results, dict) else (results or [])
+    flat = []
+    for item in items:
+        flat.append({
                 "idx": len(flat),
                 "uuid": item.get("id", ""),
                 "text": item.get("memory", ""),
