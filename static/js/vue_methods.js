@@ -12550,7 +12550,11 @@ copyIslandEndpoint(){
 
     if (!launchResult?.success) {
       this.connectingAppId = null;
-      showNotification(`${app.name}: 无法开启调试端口，该应用可能不支持 CDP 远程调试`, 'error');
+      let msg = `${app.name}: 无法开启调试端口，该应用可能不支持 CDP 远程调试`;
+      if (!this.localAppControlSettings.forceNewInstance) {
+        msg += '，可尝试开启「开启新实例（独立用户数据）」开关后重试';
+      }
+      showNotification(msg, 'error');
       return;
     }
 
@@ -12580,7 +12584,11 @@ copyIslandEndpoint(){
       } catch (e) {}
     }
     this.connectingAppId = null;
-    showNotification(`${app.name}: 连接超时，请确认应用支持 CDP 调试或尝试开启新实例`, 'error');
+    let msg = `${app.name}: 连接超时，请确认应用支持 CDP 调试`;
+    if (!this.localAppControlSettings.forceNewInstance) {
+      msg += '，可尝试开启「开启新实例（独立用户数据）」开关后重试';
+    }
+    showNotification(msg, 'error');
   },
 
   async scanLocalApps() {

@@ -5284,6 +5284,44 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                         elif len(msg['content']) == 0:
                                             msg['content'] = ""
 
+                    # === 本地应用控制截图自动注入 ===
+                    local_app_vision = (
+                        settings.get('localAppControlSettings', {}).get('enabled', False) and
+                        settings.get('localAppControlSettings', {}).get('browserVision', False)
+                    )
+                    if local_app_vision and not browser_vision_enabled and '[Getting browser screenshot]' in all_combined_results:
+                        import re, base64, os
+                        match = re.search(r'\[Getting browser screenshot\]\s*(http[^\s]+)', all_combined_results)
+                        if match:
+                            ext_img_url = match.group(1)
+                            if ext_img_url.startswith('http://127.0.0.1:'):
+                                ext_img_path = ext_img_url.split('/uploaded_files/', 1)[-1]
+                                ext_img_path = os.path.join(UPLOAD_FILES_DIR, ext_img_path)
+                                if os.path.exists(ext_img_path):
+                                    with open(ext_img_path, 'rb') as f:
+                                        b64 = base64.b64encode(f.read()).decode('utf-8')
+                                    ext = os.path.splitext(ext_img_path)[1].lower().lstrip('.')
+                                    mime = 'image/' + ('jpeg' if ext in ('jpg','jpeg') else ext)
+                                    ext_img_url = f"data:{mime};base64,{b64}"
+
+                            current_ext_msg = {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "[Getting browser screenshot]\n\n【system info】Local app screenshot injected."},
+                                    {"type": "image_url", "image_url": {"url": ext_img_url}}
+                                ]
+                            }
+                            request.messages.append(current_ext_msg)
+
+                            if settings.get('localAppControlSettings', {}).get('onlyNewScreen', True):
+                                for msg in request.messages[:-1]:
+                                    if isinstance(msg.get('content'), list):
+                                        msg['content'] = [item for item in msg['content'] if item.get('type') != 'image_url']
+                                        if len(msg['content']) == 1 and msg['content'][0].get('type') == 'text':
+                                            msg['content'] = msg['content'][0]['text']
+                                        elif len(msg['content']) == 0:
+                                            msg['content'] = ""
+
 
                     vision_control_enabled = settings.get('visionControlSettings', {}).get('enabled', False)
                     

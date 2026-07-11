@@ -445,10 +445,11 @@ async function launchAppWithDebugging(appPath, port, forceNewInstance) {
       `--remote-debugging-port=${port}`,
       '--remote-debugging-address=127.0.0.1',
     ];
-    // 始终创建独立用户数据目录 — Chrome/Edge 的 profile 锁阻止了复用已有配置开调试端口
-    profileDir = path.join(os.tmpdir(), `sap-cdp-profile-${port}`);
-    try { fs.mkdirSync(profileDir, { recursive: true }); } catch (e) {}
-    debugArgs.push(`--user-data-dir=${profileDir}`);
+    if (forceNewInstance) {
+      profileDir = path.join(os.tmpdir(), `sap-cdp-profile-${port}`);
+      try { fs.mkdirSync(profileDir, { recursive: true }); } catch (e) {}
+      debugArgs.push(`--user-data-dir=${profileDir}`);
+    }
     debugArgs.push('--no-first-run', '--no-default-browser-check');
 
     let child;

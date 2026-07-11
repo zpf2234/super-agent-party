@@ -459,6 +459,7 @@ let vue_data = {
     localAppControlSettings: {
       enabled: false,
       browserVision: false,
+      onlyNewScreen: true,
       forceNewInstance: false,
       scannedApps: [],
       connectedApps: {},

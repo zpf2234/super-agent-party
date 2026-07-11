@@ -261,6 +261,7 @@
     "localAppControlSettings": {
       "enabled": false,
       "browserVision":false,
+      "onlyNewScreen":true,
       "scannedApps": [],
       "connectedApps": {},
       "nextPort": 9223,

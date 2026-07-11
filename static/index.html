@@ -9900,6 +9900,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                       <el-form-item :label="t('appVision')" class="form-item-align" label-position="left">
                         <el-switch v-model="localAppControlSettings.browserVision" @change="autoSaveSettings"></el-switch>
                       </el-form-item>
+                      <el-form-item :label="t('onlyNewScreen')" class="form-item-align" label-position="left"
+                        v-if="localAppControlSettings.browserVision">
+                        <el-switch v-model="localAppControlSettings.onlyNewScreen" @change="autoSaveSettings"></el-switch>
+                      </el-form-item>
                       <el-form-item :label="t('forceNewInstance')" class="form-item-align" label-position="left">
                         <el-switch v-model="localAppControlSettings.forceNewInstance" @change="autoSaveSettings"></el-switch>
                       </el-form-item>
