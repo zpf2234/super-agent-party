@@ -454,10 +454,21 @@ async function launchAppWithDebugging(appPath, port, forceNewInstance) {
 
     let child;
     if (process.platform === 'darwin' && appPath.endsWith('.app')) {
-      // macOS: 用 open -n 强制新实例，避免 NSApplication 路由到已有进程
-      const appName = path.basename(appPath, '.app');
-      const openArgs = ['-n', '-a', appName, '--args', ...debugArgs];
-      child = spawn('open', openArgs, { detached: true, stdio: 'ignore' });
+      // macOS: 直接启动 .app bundle 内的可执行文件，避免 open -n 导致 child 进程
+      // 立即退出使 exitCode 检查误判，以及 NSApplication 实例路由问题
+      const macosDir = path.join(appPath, 'Contents', 'MacOS');
+      let execPath = appPath;
+      if (fs.existsSync(macosDir)) {
+        const files = fs.readdirSync(macosDir);
+        const electronBin = files.find(f => f === 'Electron');
+        const otherBin = files.find(f => !f.startsWith('.') && !f.endsWith('.plist') && f !== 'Electron');
+        const chosen = electronBin || otherBin || (files.length > 0 ? files[0] : null);
+        if (chosen) {
+          execPath = path.join(macosDir, chosen);
+        }
+      }
+      console.log('[LocalAppControl] 启动命令:', execPath, debugArgs.join(' '));
+      child = spawn(execPath, debugArgs, { detached: true, stdio: 'ignore' });
     } else {
       let execPath = appPath;
 
@@ -488,24 +499,15 @@ async function launchAppWithDebugging(appPath, port, forceNewInstance) {
         } catch (e) {}
       }
 
-      if (process.platform === 'darwin' && appPath.endsWith('.app')) {
-        const macosDir = path.join(appPath, 'Contents', 'MacOS');
-        if (fs.existsSync(macosDir)) {
-          const files = fs.readdirSync(macosDir);
-          const electronBin = files.find(f => f === 'Electron');
-          const otherBin = files.find(f => !f.startsWith('.') && !f.endsWith('.plist') && f !== 'Electron');
-          execPath = path.join(macosDir, electronBin || otherBin || files[0]);
-        }
-      }
       console.log('[LocalAppControl] 启动命令:', execPath, debugArgs.join(' '));
       child = spawn(execPath, debugArgs, { detached: true, stdio: 'ignore' });
-      child.on('error', (err) => {
-        console.error('[LocalAppControl] 启动进程失败:', err.message);
-      });
-      child.on('exit', (code) => {
-        console.log('[LocalAppControl] 进程退出, code:', code);
-      });
     }
+    child.on('error', (err) => {
+      console.error('[LocalAppControl] 启动进程失败:', err.message);
+    });
+    child.on('exit', (code) => {
+      console.log('[LocalAppControl] 进程退出, code:', code);
+    });
     child.unref();
 
     // 轮询等待 CDP 端口就绪，最多 20 秒
