@@ -310,6 +310,7 @@ import io
 import os
 from pathlib import Path
 import pickle
+import threading
 import socket
 import sys
 import tempfile
@@ -2845,6 +2846,7 @@ Assistant: 表格如下：
             if memory["id"] == memoryId:
                 cur_memory = memory
                 break
+    if cur_memory: _sanitize_card_strings(cur_memory)
     selectedMemoryName = cur_memory["name"] if cur_memory else settings["memorySettings"]["selectedMemory"]
 
     def resolve_agent_name(raw_model):
@@ -3629,6 +3631,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 if memory["id"] == memoryId:
                     cur_memory = memory
                     break
+            if cur_memory: _sanitize_card_strings(cur_memory)
             if cur_memory and cur_memory["providerId"]:
                 print("长期记忆启用")
                 config={
@@ -5926,6 +5929,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
             if memory["id"] == memoryId:
                 cur_memory = memory
                 break
+        if cur_memory: _sanitize_card_strings(cur_memory)
         if cur_memory and cur_memory["providerId"]:
             print("长期记忆启用")
             config={
@@ -11538,6 +11542,18 @@ from py.overlay_router import router as overlay_router
 app.include_router(overlay_router)
 
 # ---------- 工具 ----------
+# 每个 memory_id 一把锁，防止并发读写 faiss+pkl 文件时出现数据不一致
+_memory_locks = {}
+_memory_lock_lock = threading.Lock()
+
+def _get_memory_lock(mid: str) -> threading.Lock:
+    """获取 memory_id 对应的锁（不存在则创建），线程安全"""
+    if mid not in _memory_locks:
+        with _memory_lock_lock:
+            if mid not in _memory_locks:
+                _memory_locks[mid] = threading.Lock()
+    return _memory_locks[mid]
+
 def get_dir(mid: str) -> str:
     return os.path.join(MEMORY_CACHE_DIR, mid)
 
@@ -11549,21 +11565,40 @@ def get_pkl_path(mid: str) -> str:
 
 def load_index_and_meta(mid: str):
     import faiss
-    fpath, ppath = get_faiss_path(mid), get_pkl_path(mid)
-    if not (os.path.exists(fpath) and os.path.exists(ppath)):
-        raise HTTPException(status_code=404, detail="memory not found")
-    index = faiss.read_index(fpath)
-    with open(ppath, "rb") as f:
-        raw = pickle.load(f)          # 可能是 tuple 也可能是 dict
-    # 兼容旧数据：如果是 tuple 取第 0 个，否则直接用
-    meta_dict = raw[0] if isinstance(raw, tuple) else raw
+    with _get_memory_lock(mid):
+        fpath, ppath = get_faiss_path(mid), get_pkl_path(mid)
+        if not (os.path.exists(fpath) and os.path.exists(ppath)):
+            raise HTTPException(status_code=404, detail="memory not found")
+        index = faiss.read_index(fpath)
+        with open(ppath, "rb") as f:
+            raw = pickle.load(f)          # 可能是 tuple 也可能是 dict
+        # 兼容旧数据：如果是 tuple 取第 0 个，否则直接用
+        meta_dict = raw[0] if isinstance(raw, tuple) else raw
     return index, meta_dict
 
 def save_index_and_meta(mid: str, index, meta: List[Dict[Any, Any]]):
     import faiss
-    faiss.write_index(index, get_faiss_path(mid))
-    with open(get_pkl_path(mid), "wb") as f:
-        pickle.dump(meta, f)
+    with _get_memory_lock(mid):
+        faiss.write_index(index, get_faiss_path(mid))
+        with open(get_pkl_path(mid), "wb") as f:
+            pickle.dump(meta, f)
+
+
+def _sanitize_card_strings(memory: dict) -> None:
+    """防御性清理：移除角色卡文本字段中的控制字符（保留 \\n \\r \\t），防止破坏 API 请求"""
+    import re
+    _bad_ctrl = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]')
+    text_keys = ('description', 'personality', 'mesExample', 'systemPrompt',
+                 'firstMes', 'name', 'characterBook')
+    for key in text_keys:
+        val = memory.get(key)
+        if isinstance(val, str):
+            memory[key] = _bad_ctrl.sub('', val)
+    alt_gs = memory.get('alternateGreetings')
+    if isinstance(alt_gs, list):
+        for i in range(len(alt_gs)):
+            if isinstance(alt_gs[i], str):
+                alt_gs[i] = _bad_ctrl.sub('', alt_gs[i])
 
 
 def fmt_iso8605_to_local(iso: str) -> str:
@@ -11646,15 +11681,29 @@ async def delete_text(memory_id: str, idx: int) -> dict:
     ntotal = index.ntotal
     print("index.ntotal",index.ntotal)
     print("len(meta_list)",len(meta_list))
+
+    # 容错：修复并发写入或异常关机导致的两边数据不一致
     if ntotal != len(meta_list):
-        raise RuntimeError("index 与 meta 长度不一致")
+        reconciled = min(ntotal, len(meta_list))
+        print(f"[WARNING] delete_text: index.ntotal({ntotal}) != len(meta_list)({len(meta_list)}), "
+              f"auto-reconciling to {reconciled}")
+        if ntotal > len(meta_list):
+            # faiss 向量比 pickle 记录多：以 pickle 为准，截断向量
+            ntotal = len(meta_list)
+        else:
+            # pickle 记录比 faiss 向量多：截断 meta_list
+            meta_list = meta_list[:ntotal]
+
+        if idx >= len(meta_list):
+            raise HTTPException(status_code=400,
+                detail="index out of range after auto-repair. Please refresh and retry.")
 
     # 1. 重建 Faiss 索引（去掉 idx）
-    ids_to_keep = np.array([i for i in range(ntotal) if i != idx], dtype=np.int64)
+    ids_to_keep = [i for i in range(ntotal) if i != idx]
     vecs = np.vstack([index.reconstruct(i) for i in range(ntotal)])
-    new_index = faiss.IndexFlatL2(index.d)   # 跟你建索引时保持一致
-    if vecs.shape[0] - 1 > 0:
-        new_index.add(vecs[ids_to_keep].astype("float32"))
+    new_index = faiss.IndexFlatL2(index.d)
+    if ids_to_keep:
+        new_index.add(vecs[np.array(ids_to_keep, dtype=np.int64)].astype("float32"))
 
     # 2. 删除列表元素
     del meta_list[idx]

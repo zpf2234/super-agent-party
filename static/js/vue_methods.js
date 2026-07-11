@@ -9072,28 +9072,40 @@ handleCreateSlackSeparator(val) {
       reader.readAsText(file); // 读取文件内容
     },
 
+    _sanitizeCardText(raw, maxLen = 100 * 1024) {
+      if (typeof raw !== 'string') return raw || '';
+      // 移除破坏 JSON / API 传输的控制字符（保留换行、回车、制表符）
+      let cleaned = raw.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+      if (cleaned.length > maxLen) {
+        console.warn(`[_sanitizeCardText] 字段过长 ${cleaned.length} > ${maxLen}，已截断`);
+        cleaned = cleaned.substring(0, maxLen);
+      }
+      return cleaned;
+    },
+
     importMemoryData(jsonData) {
       // 兼容 V2/V3：统一抽出 data
       const data = jsonData.data || jsonData;
+      const s = this._sanitizeCardText.bind(this);
 
       this.newMemory = {
         ...this.newMemory,                      // 保持 providerId 等旧字段
-        name: data.name || '',
-        description: data.description || '',
+        name: s(data.name).substring(0, 512),   // 名称限制 512 字符
+        description: s(data.description),
         avatar: data.avatar || '',
-        personality: data.personality || '',
-        mesExample: data.mes_example || '',
-        systemPrompt: data.system_prompt || '',
-        firstMes: data.first_mes || '',
+        personality: s(data.personality),
+        mesExample: s(data.mes_example),
+        systemPrompt: s(data.system_prompt),
+        firstMes: s(data.first_mes),
         alternateGreetings: Array.isArray(data.alternate_greetings)
-          ? data.alternate_greetings
+          ? data.alternate_greetings.map(g => s(g))
           : [''],
         characterBook:
           Array.isArray(data.character_book?.entries) &&
           data.character_book.entries.length
             ? data.character_book.entries.map(e => ({
-                keysRaw: (e.keys || []).join('\n'),
-                content: e.content || ''
+                keysRaw: s((e.keys || []).join('\n')),
+                content: s(e.content)
               }))
             : [{ keysRaw: '', content: '' }]
       };
