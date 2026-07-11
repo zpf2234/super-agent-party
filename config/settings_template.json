@@ -265,7 +265,8 @@
       "connectedApps": {},
       "nextPort": 9223,
       "scanning": false,
-      "selectedApp": null
+      "selectedApp": null,
+      "manualApps": []
     },
     "sqlSettings":{
       "enabled": false,

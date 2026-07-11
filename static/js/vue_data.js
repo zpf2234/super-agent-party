@@ -465,7 +465,11 @@ let vue_data = {
       nextPort: 9223,
       scanning: false,
       selectedApp: null,
+      manualApps: [],
     },
+    localAppSearch: "",
+    manualAppInput: "",
+    connectingAppId: null,
     sqlSettings:{
       enabled: false,
       engine: "sqlite",
