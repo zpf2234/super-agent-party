@@ -12504,6 +12504,7 @@ copyIslandEndpoint(){
     }
     if (this.connectingAppId) return; // 已有应用在连接中
     this.connectingAppId = app.id;
+    console.log(`[smartConnect] 开始连接 ${app.name}, port=${app.cdpPort || this.localAppControlSettings.nextPort}, forceNewInstance=${this.localAppControlSettings.forceNewInstance}`);
     showNotification(`正在连接 ${app.name}…`, 'info');
     const port = app.cdpPort || this.localAppControlSettings.nextPort;
 
@@ -12517,6 +12518,7 @@ copyIslandEndpoint(){
       if (resp.ok) {
         const d = await resp.json();
         if (d.success) {
+          console.log(`[smartConnect] ${app.name} 直连成功 (port=${port})`);
           this.localAppControlSettings.connectedApps[app.id] = {
             appId: app.id, appName: app.name, port: port,
             targets: d.targets || [], usableCount: d.usableCount || 0,
@@ -12531,6 +12533,7 @@ copyIslandEndpoint(){
         }
       }
     } catch (e) {}
+    console.log(`[smartConnect] ${app.name} 直连失败, 准备杀掉残留进程并启动调试`);
 
     // 2. 直连失败，杀掉残留进程后启动调试
     try { await window.electronAPI.quitAppProcess({ pid: app.pid || 0, path: app.path }); } catch (e) {}
@@ -12541,12 +12544,14 @@ copyIslandEndpoint(){
     app.cdpPort = port;
     this.localAppControlSettings.nextPort = port + 1;
 
+    console.log(`[smartConnect] ${app.name} 正在启动调试端口 (path=${app.path}, port=${port})`);
     const launchResult = await window.electronAPI.launchAppWithDebugging({
       path: app.path, port: port,
       forceNewInstance: this.localAppControlSettings.forceNewInstance
     });
     app.isRunning = !!launchResult?.success;
     app.pid = launchResult?.pid || app.pid;
+    console.log(`[smartConnect] ${app.name} 启动结果: success=${!!launchResult?.success}, pid=${launchResult?.pid}, error=${launchResult?.error || 'none'}`);
 
     if (!launchResult?.success) {
       this.connectingAppId = null;
@@ -12559,6 +12564,7 @@ copyIslandEndpoint(){
     }
 
     // 3. 轮询连接，最多 3 次
+    console.log(`[smartConnect] ${app.name} 启动成功, 开始轮询连接 CDP (最多3次)`);
     for (let i = 0; i < 3; i++) {
       await new Promise(r => setTimeout(r, 1000));
       try {
@@ -12570,6 +12576,7 @@ copyIslandEndpoint(){
         if (resp.ok) {
           const d = await resp.json();
           if (d.success) {
+            console.log(`[smartConnect] ${app.name} 轮询第${i+1}次连接成功 (port=${port})`);
             this.localAppControlSettings.connectedApps[app.id] = {
               appId: app.id, appName: app.name, port: port,
               targets: d.targets || [], usableCount: d.usableCount || 0,
