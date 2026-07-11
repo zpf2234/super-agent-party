@@ -11627,15 +11627,39 @@ async def _get_m0_config_for_memory(memory_id: str):
         try:
             with open(_ppath, "rb") as f:
                 _raw = pickle.load(f)
+            _needs_migration = False
+            _needs_repair = False
             if not (isinstance(_raw, tuple) and len(_raw) == 2 and isinstance(_raw[0], dict)):
+                _needs_migration = True
+            else:
+                # 已迁移但可能缺少 user_id，检查第一个条目
+                _docstore = _raw[0]
+                if _docstore:
+                    _first = next(iter(_docstore.values()), {})
+                    if isinstance(_first, dict) and "user_id" not in _first:
+                        _needs_repair = True
+            if _needs_migration or _needs_repair:
                 import faiss
                 index = faiss.read_index(_faiss_path)
-                if isinstance(_raw, dict):
-                    meta_for_migration = _raw
-                elif isinstance(_raw, tuple) and isinstance(_raw[0], dict):
-                    meta_for_migration = _raw[0]
+                if _needs_migration:
+                    if isinstance(_raw, dict):
+                        meta_for_migration = _raw
+                    elif isinstance(_raw, tuple) and isinstance(_raw[0], dict):
+                        meta_for_migration = _raw[0]
+                    else:
+                        meta_for_migration = {}
                 else:
+                    # _needs_repair: 已有 (docstore, idx2id) 格式，重建以补充 user_id
+                    _existing_idx2id = _raw[1]
                     meta_for_migration = {}
+                    for _idx in sorted(_existing_idx2id.keys()):
+                        _vid = _existing_idx2id[_idx]
+                        _payload = _raw[0].get(_vid, {})
+                        meta_for_migration[_vid] = {
+                            "data": _payload.get("data", ""),
+                            "created_at": _payload.get("created_at", ""),
+                            "timetamp": _payload.get("updated_at", _payload.get("created_at", "")),
+                        }
                 docstore = {}
                 idx2id = {}
                 for idx, (vid, rec) in enumerate(meta_for_migration.items()):
@@ -11645,13 +11669,13 @@ async def _get_m0_config_for_memory(memory_id: str):
                         "hash": hashlib.md5(data_t.encode()).hexdigest(),
                         "created_at": rec.get("created_at", "") if isinstance(rec, dict) else "",
                         "updated_at": rec.get("timetamp", rec.get("created_at", "")) if isinstance(rec, dict) else "",
+                        "user_id": memory_id,
                     }
                     idx2id[idx] = vid
                 with open(_ppath, "wb") as f:
                     pickle.dump((docstore, idx2id), f)
-                print(f"[INFO] pickle 已迁移为 mem0 兼容格式: {_ppath}")
-        except Exception as e:
-            print(f"[WARNING] pickle 迁移失败: {e}")
+                action = "已迁移" if _needs_migration else "已修复(补充 user_id)"
+                print(f"[INFO] pickle {action}为 mem0 兼容格式: {_ppath}")
 
     config = {
         "embedder": {
